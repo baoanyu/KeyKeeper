@@ -1,0 +1,33 @@
+[package]
+name = "keykeeper"
+version = "0.1.0"
+description = "macOS 多平台 API 配额聚合器"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-store = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+reqwest = { version = "0.12", features = ["json", "native-tls"] }
+anyhow = "1"
+thiserror = "1"
+keyring = "3"
+futures = "0.3"
+async-trait = "0.1"
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"

@@ -1,1 +1,32 @@
-/doc/
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+
+# Rust build artifacts (huge! can be several GB)
+src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Rust toolchain lockfile (optional, can be committed for binaries)
+# src-tauri/Cargo.lock
+/CLAUDE.md
