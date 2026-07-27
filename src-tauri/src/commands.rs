@@ -53,23 +53,25 @@ async fn set_qoder_first_launch(app: &tauri::AppHandle, timestamp: f64) -> Resul
     Ok(())
 }
 
+async fn ensure_providers_loaded(state: &AppState, app: &tauri::AppHandle) -> Vec<String> {
+    let guard = state.providers.lock().await;
+    if guard.is_empty() {
+        drop(guard);
+        let stored = load_providers(app).await;
+        let mut guard = state.providers.lock().await;
+        *guard = stored;
+        guard.clone()
+    } else {
+        guard.clone()
+    }
+}
+
 #[tauri::command]
 pub async fn get_all_quotas(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Vec<QuotaInfo>, String> {
-    let providers = {
-        let guard = state.providers.lock().await;
-        if guard.is_empty() {
-            drop(guard);
-            let stored = load_providers(&app).await;
-            let mut guard = state.providers.lock().await;
-            *guard = stored;
-            guard.clone()
-        } else {
-            guard.clone()
-        }
-    };
+    let providers = ensure_providers_loaded(&state, &app).await;
     
     // Get or set Qoder first launch time
     let qoder_first_launch = get_qoder_first_launch(&app).await;
@@ -151,19 +153,7 @@ pub async fn get_saved_providers(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Vec<String>, String> {
-    let providers = {
-        let guard = state.providers.lock().await;
-        if guard.is_empty() {
-            drop(guard);
-            let stored = load_providers(&app).await;
-            let mut guard = state.providers.lock().await;
-            *guard = stored;
-            guard.clone()
-        } else {
-            guard.clone()
-        }
-    };
-    Ok(providers)
+    Ok(ensure_providers_loaded(&state, &app).await)
 }
 
 #[tauri::command]

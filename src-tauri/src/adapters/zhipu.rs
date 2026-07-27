@@ -3,7 +3,7 @@ use anyhow::Result;
 use reqwest::Client;
 use std::sync::Arc;
 use crate::models::{PlanType, QuotaInfo, QuotaUnit};
-use super::QuotaFetcher;
+use super::{sanitize_error_body, QuotaFetcher};
 
 pub struct ZhipuFetcher {
     client: Arc<Client>,
@@ -27,7 +27,8 @@ impl QuotaFetcher for ZhipuFetcher {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Ok(QuotaInfo::error("ZhipuAI", &format!("HTTP {}: {}", status, text)));
+            let sanitized = sanitize_error_body(&text);
+            return Ok(QuotaInfo::error("ZhipuAI", &format!("HTTP {}: {}", status, sanitized)));
         }
 
         let json: serde_json::Value = resp.json().await?;

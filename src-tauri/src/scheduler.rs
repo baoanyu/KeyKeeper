@@ -14,8 +14,14 @@ pub async fn fetch_all_quotas(
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENCY));
     let mut handles = Vec::new();
 
-    for (provider_name, api_key, fetcher) in tasks {
+    let provider_names: Vec<String> = tasks
+        .iter()
+        .map(|(name, _, _)| name.clone())
+        .collect();
+
+    for (_idx, (_provider_name, api_key, fetcher)) in tasks.into_iter().enumerate() {
         let sem = semaphore.clone();
+        let provider_name = provider_names[_idx].clone();
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
             let result = timeout(
@@ -36,7 +42,14 @@ pub async fn fetch_all_quotas(
     let results = join_all(handles).await;
     results
         .into_iter()
-        .filter_map(|r| r.ok())
+        .enumerate()
+        .map(|(i, r)| match r {
+            Ok(quota) => quota,
+            Err(join_err) => QuotaInfo::error(
+                &provider_names[i],
+                &format!("Internal panic: {}", join_err),
+            ),
+        })
         .collect()
 }
 

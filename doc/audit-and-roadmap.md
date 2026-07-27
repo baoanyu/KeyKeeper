@@ -1,11 +1,59 @@
 # KeyKeeper 审计与规划文档
 
-> 生成时间：2026-07-23（最后更新：2026-07-23，含 Volcano 认知修正）
+> 生成时间：2026-07-23（最后更新：2026-07-27，含对抗性审查修正）
 > 相关文档：[KeyKeeper.md](KeyKeeper.md)（设计）· [development-plan.md](development-plan.md)（历史）· [ux-improvements.md](ux-improvements.md)（易用性改进）· [../CLAUDE.md](../CLAUDE.md)
 >
 > 本文档汇总了 KeyKeeper 项目的**报错与 Bug 相关审计结果**、修复计划、功能路线图和方法论反思。
 > 由三份原始文档（`fix-plan.md`、`roadmap.md`、`adversarial-review.md`）合并整理而成。
 > 易用性 / UX 改进部分已独立到 `ux-improvements.md`。
+
+> **对抗性审查结果（2026-07-27）**
+>
+> 本次审查把文档每个"事实断言"都对照当前代码重新验证，结论分三类：
+>
+> - ✅ **代码已修复**：文档描述的 bug 在当前代码里已不存在（文档过时）
+> - ✅ **已实施修复**：本轮按文档建议完成了代码修复
+> - ⛔ **依赖外部信息**：修复需要真实 API Key / 用户抓包 / 设计资源，无法在没凭据的情况下实施
+>
+> | 条目 | 状态 | 说明 |
+> |:---|:---|:---|
+> | P0-1 PlanType 序列化 | ✅ 代码已修复 | 当前已是 `snake_case`，文档断言错误 |
+> | P0-2 DeepSeek 余额解析 | ⛔ 待 curl 验证 | 代码确实读错字段，但真实 API 结构需用户抓包确认 |
+> | P0-3 Volcano 全面错误 | ⛔ 待用户抓 API | 代码确实错误，但正确实现依赖真实 API 端点 |
+> | P0-4 Qoder 认知可能有误 | ⛔ 待用户抓 API | 同上 |
+> | P0-5 并入 P0-3 | ⛔ 同上 | 数据模型 v2 是 breaking change，需 P0-3 落地后一起做 |
+> | P0-6 托盘 Template Image | ⛔ 需设计资源 | 需要设计师提供 Template PNG |
+> | P0-7 CLAUDE.md 虚假功能 | 📝 待修文档 | `check_low_balance` 已注册但前端未调用 |
+> | P0-8 setTimeout 泄露 | ✅ 已实施修复 | 见 `src/App.vue` |
+> | P1-1 启动重复刷新 | ✅ 已实施修复 | 见 `src-tauri/src/main.rs` |
+> | P1-2 providers 竞态 | ✅ 已实施修复 | 见 `src-tauri/src/commands.rs` |
+> | P1-3 错误响应泄露 Token | ✅ 已实施修复 | 见 `src-tauri/src/adapters/` |
+> | P1-4 多余 shell 权限 | ✅ 已实施修复 | 已移除 shell 插件 |
+> | P1-5 npm 而非 pnpm | ✅ 代码已修复 | 当前已是 pnpm，文档断言错误 |
+> | P1-6 scheduler 吞 panic | ✅ 已实施修复 | 见 `src-tauri/src/scheduler.rs` |
+> | P1-7 onUnmounted 死代码 | ✅ 已实施修复 | 见 `src/App.vue` |
+> | P2-1 低额度通知 | 📝 待实施 | 消费 P0-3 告警门槛 |
+> | P2-2 阈值分歧 | 📝 待实施 | |
+> | P2-3 Qoder 时间持久化 | 📝 待实施 | |
+> | P2-4 锁类型 + 跨 await | 📝 待实施 | 需引入 parking_lot |
+> | P2-5 静默覆盖 Key | 📝 待实施 | |
+> | P2-6 并入 P0-3 | ⛔ 同上 | |
+> | P2-7 strong-typed | 📝 待实施 | 建议等 P0-3 数据模型 v2 一起做 |
+> | P2-8 PlatformSpec | 📝 待实施 | |
+> | P3-1 未使用依赖 | ✅ 已实施修复 | 已移除 thiserror、base64 |
+> | P3-2 unwrap | 📝 待实施 | |
+> | P3-3 默认图标 unwrap | 📝 待实施 | |
+> | P3-4 load_providers 吞错 | 📝 待实施 | |
+> | P3-5 lang=en | ✅ 代码已修复 | 当前已是 zh-CN，文档断言错误 |
+> | P3-6 entitlements | 📝 待实施 | |
+> | P3-7 .gitignore | ✅ 已实施修复 | 已移除 /doc/ 排除，但文档断言本身有误（原排除整个 /doc/ 而非仅 CLAUDE.md） |
+> | P3-8 Cargo 版本约束 | 📝 待实施 | |
+> | P3-9 Cargo.lock | 📝 待实施 | |
+> | P3-10 bundle.category | 📝 待实施 | |
+> | P3-11 Qoder 无 Key | 📝 待实施 | |
+>
+> **本轮未实施项的共同卡点**：P0-3 数据模型 v2 是 P0-2/P0-4/P0-5/P2-6/P2-7 的前置依赖，而 P0-3 的正确实现需要用户在真实环境抓 API（Sprint 0 前置调查）。建议用户完成 Sprint 0 后再启动 Sprint A。
+
 
 ---
 
@@ -1036,4 +1084,5 @@ src-tauri/tests/
 | 日期 | 变更 |
 |:---|:---|
 | 2026-07-23 | 初版（合并自 fix-plan.md、roadmap.md、adversarial-review.md 三份文档） |
+| 2026-07-27 | **对抗性审查修正**：逐条验证文档断言 vs 当前代码，发现 P0-1/P1-5/P3-5 三项文档断言错误（代码已修复）；实施 P0-8/P1-1/P1-2/P1-3/P1-4/P1-6/P1-7/P3-1/P3-7 共 9 项修复；P0-2/P0-3/P0-4/P0-5/P0-6/P2-6 共 6 项因依赖真实 API Key / 设计资源未实施，需用户完成 Sprint 0 抓包后继续。 |
 | 2026-07-23 | **Volcano 认知修正**：用户提供火山方舟控制台截图，推翻 P0-3 的"无 API"假设。P0-3 重写为"抓真实 API + 数据模型 v2 + 多维度用量"；P0-5 并入 P0-3；P2-6 并入 P0-3；Sprint 顺序重排，新增 Sprint 0 前置调查阶段；方法论反思增加第 1 条"未查文档就给结论"。易用性建议独立到 `ux-improvements.md`。 |

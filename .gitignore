@@ -30,3 +30,4 @@ pnpm-debug.log*
 # Rust toolchain lockfile (optional, can be committed for binaries)
 # src-tauri/Cargo.lock
 /CLAUDE.md
+/doc/

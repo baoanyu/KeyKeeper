@@ -3,7 +3,7 @@ use anyhow::Result;
 use reqwest::Client;
 use std::sync::Arc;
 use crate::models::{PlanType, QuotaInfo, QuotaUnit};
-use super::QuotaFetcher;
+use super::{sanitize_error_body, QuotaFetcher};
 use hmac::{Hmac, Mac};
 use sha2::{Sha256, Digest};
 
@@ -101,7 +101,8 @@ impl QuotaFetcher for VolcanoFetcher {
             Ok(resp) => {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                Ok(QuotaInfo::error("Volcano", &format!("HTTP {}: {}", status, text)))
+                let sanitized = sanitize_error_body(&text);
+                Ok(QuotaInfo::error("Volcano", &format!("HTTP {}: {}", status, sanitized)))
             }
             Err(e) => Ok(QuotaInfo::error("Volcano", &e.to_string())),
         }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import QuotaCard from './components/QuotaCard.vue';
@@ -13,16 +13,25 @@ const lastUpdated = ref<string>('');
 const error = ref<string>('');
 const success = ref<string>('');
 
-let autoRefreshUnlisten: (() => void) | null = null;
+let successTimer: number | null = null;
+let errorTimer: number | null = null;
 
 function showSuccess(msg: string) {
   success.value = msg;
-  setTimeout(() => { success.value = ''; }, 3000);
+  if (successTimer !== null) clearTimeout(successTimer);
+  successTimer = window.setTimeout(() => {
+    success.value = '';
+    successTimer = null;
+  }, 3000);
 }
 
 function showError(msg: string) {
   error.value = msg;
-  setTimeout(() => { error.value = ''; }, 5000);
+  if (errorTimer !== null) clearTimeout(errorTimer);
+  errorTimer = window.setTimeout(() => {
+    error.value = '';
+    errorTimer = null;
+  }, 5000);
 }
 
 async function refresh() {
@@ -64,16 +73,11 @@ onMounted(async () => {
   await refresh();
   
   // Listen for auto-refresh events
-  autoRefreshUnlisten = await listen('auto-refresh', () => {
+  await listen('auto-refresh', () => {
     refresh();
   });
 });
 
-onUnmounted(() => {
-  if (autoRefreshUnlisten) {
-    autoRefreshUnlisten();
-  }
-});
 </script>
 
 <template>

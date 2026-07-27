@@ -32,7 +32,6 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_shell::init())
         .manage(AppState {
             providers: TokioMutex::new(Vec::new()),
             http_client,
@@ -81,6 +80,9 @@ fn main() {
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(AUTO_REFRESH_INTERVAL_SECS));
+                // Consume the first immediate tick so the initial refresh
+                // is not duplicated with App.vue's onMounted refresh().
+                interval.tick().await;
                 loop {
                     interval.tick().await;
                     if let Some(window) = app_handle.get_webview_window("main") {
