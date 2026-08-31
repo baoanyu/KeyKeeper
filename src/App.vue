@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { sendNotification } from '@tauri-apps/plugin-notification';
 import QuotaCard from './components/QuotaCard.vue';
 import AddProviderForm from './components/AddProviderForm.vue';
 import RefreshBar from './components/RefreshBar.vue';
@@ -39,13 +40,30 @@ function showError(msg: string) {
   }, 5000);
 }
 
+// P2-1: check low balance and fire system notification
+async function checkAndNotify(result: QuotaInfo[]) {
+  try {
+    const lowProviders = await invoke<string[]>('check_low_balance', { quotas: result });
+    if (lowProviders.length > 0) {
+      sendNotification({
+        title: 'KeyKeeper 提醒',
+        body: `以下平台余额不足：${lowProviders.join('、')}`,
+      });
+    }
+  } catch (e) {
+    console.warn('check_low_balance failed:', e);
+  }
+}
+
 async function refresh() {
+  if (loading.value) return; // debounce: ignore concurrent refresh requests
   loading.value = true;
   error.value = '';
   try {
     const result = await invoke<QuotaInfo[]>('get_all_quotas');
     quotas.value = result;
     lastUpdated.value = new Date().toLocaleTimeString();
+    await checkAndNotify(result);
   } catch (e) {
     showError(String(e));
   } finally {
@@ -53,14 +71,16 @@ async function refresh() {
   }
 }
 
-// U-21: single-card retry
+// U-21: single-card retry (currently does full refresh; provider param reserved for future per-card refresh)
 async function retryProvider(_provider: string) {
+  if (loading.value) return; // debounce
   loading.value = true;
   error.value = '';
   try {
     const result = await invoke<QuotaInfo[]>('get_all_quotas');
     quotas.value = result;
     lastUpdated.value = new Date().toLocaleTimeString();
+    await checkAndNotify(result);
   } catch (e) {
     showError(String(e));
   } finally {
@@ -72,7 +92,7 @@ async function retryProvider(_provider: string) {
 // F1 (P0 fix): preserve old key on reconfigure — restore it if new key fails validation
 async function validateAndAddProvider(provider: string, key: string) {
   if (provider === 'Qoder') {
-    await addProvider(provider, key);
+    await addProviderWithoutKey(provider);
     return;
   }
 
@@ -122,9 +142,9 @@ async function validateAndAddProvider(provider: string, key: string) {
   }
 }
 
-async function addProvider(provider: string, key: string) {
+// P3-11 / Fix #3: Qoder has no key — skip Keychain write, only register the provider
+async function addProviderWithoutKey(provider: string) {
   try {
-    await invoke('save_provider_key', { provider, key });
     await invoke('add_provider', { provider });
     await refresh();
     showSuccess(`已添加 ${provider}`);

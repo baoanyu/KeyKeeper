@@ -54,8 +54,8 @@ fn main() {
             };
 
             // Tray icon setup with click handler and menu
-            // U-24: retain handle for dynamic tooltip updates
-            let tray = TrayIconBuilder::new()
+            // U-24: retain handle for dynamic tooltip updates (currently unused)
+            let _tray = TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip("KeyKeeper - API 配额管理")
                 .menu(&menu)
@@ -170,10 +170,11 @@ fn check_low_balance(quotas: Vec<serde_json::Value>) -> Vec<String> {
         let unit = quota.get("quota_unit").and_then(|v| v.as_str()).unwrap_or("unknown");
 
         // F9: relative rule now reachable — fires when total is known
+        // Bind total once to avoid repeated unwrap_or and make the 10%-of-total rule clear
         let is_low = match unit {
-            "cny" => remaining < 10.0 || (total.unwrap_or(0.0) > 0.0 && remaining < total.unwrap_or(0.0) * 0.1),
-            "tokens" => remaining < 1000.0 || (total.unwrap_or(0.0) > 0.0 && remaining < total.unwrap_or(0.0) * 0.1),
-            "seconds" => remaining < 600.0 || (total.unwrap_or(0.0) > 0.0 && remaining < total.unwrap_or(0.0) * 0.1),
+            "cny" => remaining < 10.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
+            "tokens" => remaining < 1000.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
+            "seconds" => remaining < 600.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
             _ => false,
         };
         

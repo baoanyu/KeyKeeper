@@ -9,7 +9,7 @@ macOS 菜单栏应用，聚合多个 AI 平台的 API 配额/余额查询。
 - 聚合查询 DeepSeek、智谱AI、Qoder、火山方舟四个平台（Volcano/Qoder 修复中）
 - 一键刷新查看所有平台余额
 - 安全存储 API Key（macOS Keychain）
-- 低额度通知（计划中，见 audit-and-roadmap.md P2-1）
+- 低额度通知（计划中，见 doc/requirements-backlog.md P2-1）
 
 ## 技术栈
 

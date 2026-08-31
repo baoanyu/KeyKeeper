@@ -20,3 +20,12 @@ pub fn delete_key(provider: &str) -> Result<()> {
     entry.delete_credential()?;
     Ok(())
 }
+
+pub fn has_key(provider: &str) -> Result<bool> {
+    let entry = Entry::new(SERVICE_NAME, provider)?;
+    match entry.get_password() {
+        Ok(_) => Ok(true),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}

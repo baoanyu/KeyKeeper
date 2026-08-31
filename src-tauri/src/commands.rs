@@ -148,11 +148,11 @@ pub async fn save_provider_key(
     key: String,
 ) -> Result<(), String> {
     keystore::save_key(&provider, &key).map_err(|e| e.to_string())?;
-    
+
     let mut providers = state.providers.lock().await;
     if !providers.contains(&provider) {
         providers.push(provider);
-        let _ = save_providers(&app, &providers).await;
+        save_providers(&app, &providers).await.map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -164,10 +164,10 @@ pub async fn delete_provider(
     provider: String,
 ) -> Result<(), String> {
     keystore::delete_key(&provider).map_err(|e| e.to_string())?;
-    
+
     let mut providers = state.providers.lock().await;
     providers.retain(|p| p != &provider);
-    let _ = save_providers(&app, &providers).await;
+    save_providers(&app, &providers).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -185,10 +185,16 @@ pub async fn add_provider(
     app: tauri::AppHandle,
     provider: String,
 ) -> Result<(), String> {
+    // Guard: only register a provider if its key actually exists in Keychain.
+    // This prevents adding a provider that would silently fail on every refresh.
+    if !keystore::has_key(&provider).map_err(|e| e.to_string())? {
+        return Err(format!("无法添加 {}：Keychain 中未找到该平台的 API Key", provider));
+    }
+
     let mut providers = state.providers.lock().await;
     if !providers.contains(&provider) {
         providers.push(provider);
-        let _ = save_providers(&app, &providers).await;
+        save_providers(&app, &providers).await.map_err(|e| e.to_string())?;
     }
     Ok(())
 }
