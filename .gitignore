@@ -31,3 +31,4 @@ pnpm-debug.log*
 # src-tauri/Cargo.lock
 /CLAUDE.md
 /doc/
+/AGENTS.md
