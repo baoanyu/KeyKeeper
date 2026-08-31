@@ -25,20 +25,21 @@ impl QuotaFetcher for QoderFetcher {
                 .unwrap_or_default()
                 .as_secs_f64()
         });
-        
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs_f64();
-        
-        let elapsed = now - first_launch;
-        let remaining = (CODING_PLAN_DURATION_SECS - elapsed).max(0.0);
+
+        // F10: roll over every 5-hour window instead of clamping to 0 forever
+        let elapsed = (now - first_launch) % CODING_PLAN_DURATION_SECS;
+        let remaining = CODING_PLAN_DURATION_SECS - elapsed;
 
         Ok(QuotaInfo {
             provider_name: "Qoder".to_string(),
             plan_type: PlanType::CodingPlan,
             quota_unit: QuotaUnit::Seconds,
-            total: CODING_PLAN_DURATION_SECS,
+            total: Some(CODING_PLAN_DURATION_SECS),
             remaining,
             is_success: true,
             error_msg: Some("本地估算（无公开余额接口）".to_string()),

@@ -85,18 +85,21 @@ impl QuotaFetcher for VolcanoFetcher {
                 let remaining = json
                     .get("data")
                     .and_then(|d| d.get("remaining"))
-                    .and_then(|r| r.as_f64())
-                    .unwrap_or(0.0);
+                    .and_then(|r| r.as_f64());
 
-                Ok(QuotaInfo {
-                    provider_name: "Volcano".to_string(),
-                    plan_type: PlanType::PayAsYouGo,
-                    quota_unit: QuotaUnit::CNY,
-                    total: remaining,
-                    remaining,
-                    is_success: true,
-                    error_msg: None,
-                })
+                match remaining {
+                    Some(r) => Ok(QuotaInfo {
+                        provider_name: "Volcano".to_string(),
+                        plan_type: PlanType::PayAsYouGo,
+                        quota_unit: QuotaUnit::CNY,
+                        // F8: wallet-style API — total unknown
+                        total: None,
+                        remaining: r,
+                        is_success: true,
+                        error_msg: None,
+                    }),
+                    None => Ok(QuotaInfo::error("Volcano", "响应缺少 data.remaining 字段")),
+                }
             }
             Ok(resp) => {
                 let status = resp.status();

@@ -32,23 +32,30 @@ impl QuotaFetcher for DeepSeekFetcher {
         }
 
         let json: serde_json::Value = resp.json().await?;
-        
+
+        // F2: accept both numeric and string balance; return error on missing field
         let balance = json
             .get("data")
             .and_then(|d| d.get("balance"))
-            .and_then(|b| b.as_str())
-            .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(0.0);
+            .and_then(|b| {
+                b.as_str()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| b.as_f64())
+            });
 
-        Ok(QuotaInfo {
-            provider_name: "DeepSeek".to_string(),
-            plan_type: PlanType::PayAsYouGo,
-            quota_unit: QuotaUnit::CNY,
-            total: balance,
-            remaining: balance,
-            is_success: true,
-            error_msg: None,
-        })
+        match balance {
+            Some(b) => Ok(QuotaInfo {
+                provider_name: "DeepSeek".to_string(),
+                plan_type: PlanType::PayAsYouGo,
+                quota_unit: QuotaUnit::CNY,
+                // F8: wallet-style API — total unknown, don't fabricate total == remaining
+                total: None,
+                remaining: b,
+                is_success: true,
+                error_msg: None,
+            }),
+            None => Ok(QuotaInfo::error("DeepSeek", "响应缺少 data.balance 字段")),
+        }
     }
 }
 

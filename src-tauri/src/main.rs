@@ -12,7 +12,7 @@ mod adapters;
 mod scheduler;
 mod commands;
 
-use commands::{get_all_quotas, save_provider_key, delete_provider, get_saved_providers, add_provider};
+use commands::{get_all_quotas, save_provider_key, delete_provider, get_saved_providers, add_provider, get_provider_key};
 use commands::AppState;
 
 const AUTO_REFRESH_INTERVAL_SECS: u64 = 300; // 5 minutes
@@ -37,15 +37,26 @@ fn main() {
             http_client,
         })
         .setup(|app| {
-            let window = app.get_webview_window("main").unwrap();
+            // P3-2: safe unwrap — exit early if main window is unavailable
+            let window = match app.get_webview_window("main") {
+                Some(w) => w,
+                None => return Err("main window not found".into()),
+            };
 
             // Create tray menu with quit option
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit_item])?;
 
+            // P3-3: safe unwrap — propagate error if no window icon configured
+            let icon = match app.default_window_icon() {
+                Some(icon) => icon.clone(),
+                None => return Err(Box::from("default window icon not configured")),
+            };
+
             // Tray icon setup with click handler and menu
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            // U-24: retain handle for dynamic tooltip updates
+            let tray = TrayIconBuilder::new()
+                .icon(icon)
                 .tooltip("KeyKeeper - API 配额管理")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
@@ -99,6 +110,7 @@ fn main() {
             delete_provider,
             get_saved_providers,
             add_provider,
+            get_provider_key,
             check_low_balance,
         ])
         .run(tauri::generate_context!())
@@ -152,15 +164,16 @@ fn check_low_balance(quotas: Vec<serde_json::Value>) -> Vec<String> {
             continue;
         }
         
-        let total = quota.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        // F9: total is now Option<f64> — None means "unknown total" (wallet-style)
+        let total = quota.get("total").and_then(|v| v.as_f64());
         let remaining = quota.get("remaining").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let unit = quota.get("quota_unit").and_then(|v| v.as_str()).unwrap_or("unknown");
-        
-        // Check low balance rules based on unit
+
+        // F9: relative rule now reachable — fires when total is known
         let is_low = match unit {
-            "cny" => remaining < 10.0 || (total > 0.0 && remaining < total * 0.1),
-            "tokens" => remaining < 1000.0 || (total > 0.0 && remaining < total * 0.1),
-            "seconds" => remaining < 600.0 || (total > 0.0 && remaining < total * 0.1),
+            "cny" => remaining < 10.0 || (total.unwrap_or(0.0) > 0.0 && remaining < total.unwrap_or(0.0) * 0.1),
+            "tokens" => remaining < 1000.0 || (total.unwrap_or(0.0) > 0.0 && remaining < total.unwrap_or(0.0) * 0.1),
+            "seconds" => remaining < 600.0 || (total.unwrap_or(0.0) > 0.0 && remaining < total.unwrap_or(0.0) * 0.1),
             _ => false,
         };
         

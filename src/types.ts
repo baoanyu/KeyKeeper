@@ -5,7 +5,8 @@ export interface QuotaInfo {
   provider_name: string;
   plan_type: PlanType;
   quota_unit: QuotaUnit;
-  total: number;
+  /** Total quota. `undefined` when provider only exposes remaining balance. */
+  total?: number;
   remaining: number;
   is_success: boolean;
   error_msg?: string;

@@ -19,6 +19,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "category": "public.app-category.developer-tools",
     "macOS": {
       "minimumSystemVersion": "11.0",
       "entitlements": "./entitlements.plist",

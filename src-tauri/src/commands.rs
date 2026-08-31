@@ -21,12 +21,21 @@ const STORE_KEY: &str = "providers_list";
 const QODER_FIRST_LAUNCH_KEY: &str = "qoder_first_launch";
 
 async fn load_providers(app: &tauri::AppHandle) -> Vec<String> {
-    let store = app.store("keykeeper-store.json").ok();
-    if let Some(store) = store {
-        let value = store.get(STORE_KEY);
-        if let Some(value) = value {
-            if let Ok(providers) = serde_json::from_value::<Vec<String>>(value.clone()) {
-                return providers;
+    let store = match app.store("keykeeper-store.json") {
+        Ok(s) => s,
+        Err(e) => {
+            // P3-4: log instead of silently returning empty
+            log::warn!("Failed to open store: {}", e);
+            return Vec::new();
+        }
+    };
+    let value = store.get(STORE_KEY);
+    if let Some(value) = value {
+        match serde_json::from_value::<Vec<String>>(value.clone()) {
+            Ok(providers) => return providers,
+            Err(e) => {
+                // P3-4: log corrupted store data
+                log::warn!("Failed to parse providers from store: {}", e);
             }
         }
     }
@@ -72,19 +81,27 @@ pub async fn get_all_quotas(
     app: tauri::AppHandle,
 ) -> Result<Vec<QuotaInfo>, String> {
     let providers = ensure_providers_loaded(&state, &app).await;
-    
-    // Get or set Qoder first launch time
-    let qoder_first_launch = get_qoder_first_launch(&app).await;
-    let qoder_first_launch = match qoder_first_launch {
-        Some(t) => t,
-        None => {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs_f64();
-            let _ = set_qoder_first_launch(&app, now).await;
-            now
+
+    // F5: only seed Qoder first_launch if Qoder is actually configured
+    let qoder_configured = providers.contains(&"Qoder".to_string());
+    let qoder_first_launch = if qoder_configured {
+        let stored = get_qoder_first_launch(&app).await;
+        match stored {
+            Some(t) => Some(t),
+            None => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs_f64();
+                // P2-3: log persistence failure instead of silent `let _`
+                if let Err(e) = set_qoder_first_launch(&app, now).await {
+                    log::error!("Failed to persist Qoder first launch time: {}", e);
+                }
+                Some(now)
+            }
         }
+    } else {
+        None
     };
     
     let client = state.http_client.clone();
@@ -98,7 +115,7 @@ pub async fn get_all_quotas(
                 } else if provider == "ZhipuAI" {
                     Box::new(ZhipuFetcher::new(client.clone()))
                 } else if provider == "Qoder" {
-                    Box::new(QoderFetcher::new(Some(qoder_first_launch)))
+                    Box::new(QoderFetcher::new(qoder_first_launch))
                 } else if provider == "Volcano" {
                     Box::new(VolcanoFetcher::new(client.clone()))
                 } else {
@@ -115,6 +132,12 @@ pub async fn get_all_quotas(
 
     let results = fetch_all_quotas(tasks).await;
     Ok(results)
+}
+
+// F1 (P0 fix): expose key retrieval so frontend can snapshot before reconfigure
+#[tauri::command]
+pub async fn get_provider_key(provider: String) -> Result<String, String> {
+    keystore::get_key(&provider).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

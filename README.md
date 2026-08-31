@@ -2,7 +2,7 @@
 
 macOS 菜单栏应用，聚合多个 AI 平台的 API 配额/余额查询。
 
-> ⚠️ **当前状态**：早期开发中。审计已发现多个 P0 级问题（Volcano 适配器不可用、数据模型无法表达真实用量、多处 UI 语义错误）。修复计划见 [doc/audit-and-roadmap.md](doc/audit-and-roadmap.md)。
+> ⚠️ **当前状态**：早期开发中。审计已发现多个 P0 级问题（Volcano 适配器不可用、数据模型无法表达真实用量、多处 UI 语义错误）。待办需求与实施计划见 [doc/requirements-backlog.md](doc/requirements-backlog.md)。
 
 ## 功能
 
@@ -56,9 +56,7 @@ doc/              # 设计与审计文档（见下）
 
 ## 文档
 
-- [doc/KeyKeeper.md](doc/KeyKeeper.md) — 项目设计与架构
-- [doc/audit-and-roadmap.md](doc/audit-and-roadmap.md) — 审计报告、Bug 修复计划、路线图
-- [doc/ux-improvements.md](doc/ux-improvements.md) — 易用性改进建议
+- [doc/requirements-backlog.md](doc/requirements-backlog.md) — 待办需求、Bug 修复计划、路线图、UX 改进（持续更新）
 
 ## 许可证
 

@@ -32,21 +32,24 @@ impl QuotaFetcher for ZhipuFetcher {
         }
 
         let json: serde_json::Value = resp.json().await?;
-        
+
         let remaining = json
             .get("data")
             .and_then(|d| d.get("remaining_tokens"))
-            .and_then(|t| t.as_f64())
-            .unwrap_or(0.0);
+            .and_then(|t| t.as_f64());
 
-        Ok(QuotaInfo {
-            provider_name: "ZhipuAI".to_string(),
-            plan_type: PlanType::PayAsYouGo,
-            quota_unit: QuotaUnit::Tokens,
-            total: remaining,
-            remaining,
-            is_success: true,
-            error_msg: None,
-        })
+        match remaining {
+            Some(r) => Ok(QuotaInfo {
+                provider_name: "ZhipuAI".to_string(),
+                plan_type: PlanType::PayAsYouGo,
+                quota_unit: QuotaUnit::Tokens,
+                // F8: wallet-style API — total unknown
+                total: None,
+                remaining: r,
+                is_success: true,
+                error_msg: None,
+            }),
+            None => Ok(QuotaInfo::error("ZhipuAI", "响应缺少 data.remaining_tokens 字段")),
+        }
     }
 }

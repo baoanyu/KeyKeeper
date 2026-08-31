@@ -13,6 +13,11 @@ const lastUpdated = ref<string>('');
 const error = ref<string>('');
 const success = ref<string>('');
 
+// U-22: key pre-check state
+const verifying = ref(false);
+const verifyMessage = ref('');
+const reconfigureProvider = ref<string | null>(null);
+
 let successTimer: number | null = null;
 let errorTimer: number | null = null;
 
@@ -48,6 +53,75 @@ async function refresh() {
   }
 }
 
+// U-21: single-card retry
+async function retryProvider(_provider: string) {
+  loading.value = true;
+  error.value = '';
+  try {
+    const result = await invoke<QuotaInfo[]>('get_all_quotas');
+    quotas.value = result;
+    lastUpdated.value = new Date().toLocaleTimeString();
+  } catch (e) {
+    showError(String(e));
+  } finally {
+    loading.value = false;
+  }
+}
+
+// U-22: validate key before saving
+// F1 (P0 fix): preserve old key on reconfigure — restore it if new key fails validation
+async function validateAndAddProvider(provider: string, key: string) {
+  if (provider === 'Qoder') {
+    await addProvider(provider, key);
+    return;
+  }
+
+  verifying.value = true;
+  verifyMessage.value = '正在验证 Key...';
+
+  // Snapshot the old key so we can restore it on failure
+  let oldKey: string | null = null;
+  let hadKey = false;
+  try {
+    oldKey = await invoke<string>('get_provider_key', { provider });
+    hadKey = true;
+  } catch {
+    hadKey = false;
+  }
+
+  try {
+    await invoke('save_provider_key', { provider, key });
+    const result = await invoke<QuotaInfo[]>('get_all_quotas');
+    const match = result.find((q) => q.provider_name === provider);
+    if (match?.is_success) {
+      verifyMessage.value = `✓ Key 有效`;
+      quotas.value = result;
+      lastUpdated.value = new Date().toLocaleTimeString();
+      showSuccess(`已添加 ${provider}`);
+    } else {
+      // Restore old key or delete if there was none before
+      if (hadKey && oldKey) {
+        await invoke('save_provider_key', { provider, key: oldKey });
+      } else {
+        await invoke('delete_provider', { provider });
+      }
+      verifyMessage.value = `✗ ${match?.error_msg || 'Key 无效'}`;
+      showError(`Key 验证失败，已恢复原有 Key`);
+    }
+  } catch (e) {
+    if (hadKey && oldKey) {
+      await invoke('save_provider_key', { provider, key: oldKey });
+    } else {
+      try { await invoke('delete_provider', { provider }); } catch {}
+    }
+    verifyMessage.value = `✗ ${String(e)}`;
+    showError(`Key 验证失败，已恢复原有 Key`);
+  } finally {
+    verifying.value = false;
+    verifyMessage.value = '';
+  }
+}
+
 async function addProvider(provider: string, key: string) {
   try {
     await invoke('save_provider_key', { provider, key });
@@ -69,15 +143,18 @@ async function deleteProvider(provider: string) {
   }
 }
 
+// U-20: reconfigure handler
+function startReconfigure(provider: string) {
+  reconfigureProvider.value = provider;
+}
+
 onMounted(async () => {
   await refresh();
-  
-  // Listen for auto-refresh events
+
   await listen('auto-refresh', () => {
     refresh();
   });
 });
-
 </script>
 
 <template>
@@ -102,7 +179,14 @@ onMounted(async () => {
 
     <!-- Add Provider Form -->
     <div class="px-4 py-3 border-b border-gray-200">
-      <AddProviderForm @add="addProvider" />
+      <AddProviderForm
+        :preselected-provider="reconfigureProvider"
+        :disabled="verifying"
+        @add="validateAndAddProvider"
+      />
+      <p v-if="verifying" class="mt-1 text-xs text-blue-500">
+        {{ verifyMessage }}
+      </p>
     </div>
 
     <!-- Quota List -->
@@ -118,6 +202,8 @@ onMounted(async () => {
         :key="q.provider_name"
         :quota="q"
         @delete="deleteProvider(q.provider_name)"
+        @retry="retryProvider(q.provider_name)"
+        @reconfigure="startReconfigure"
       />
     </div>
 
