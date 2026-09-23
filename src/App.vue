@@ -181,9 +181,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="h-screen w-[400px] flex flex-col bg-white/80 backdrop-blur-lg text-gray-800">
-    <!-- Top Bar -->
-    <header class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+  <div class="h-screen w-full flex flex-col bg-white/80 backdrop-blur-lg text-gray-800">
+    <!-- Top Bar（可拖拽窗口，§1.1） -->
+    <header data-tauri-drag-region class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
       <div class="flex items-center gap-2">
         <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
           <span class="text-white text-sm font-bold">K</span>

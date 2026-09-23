@@ -11,7 +11,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg"],
+    "targets": [
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -34,16 +36,20 @@
         "title": "KeyKeeper",
         "width": 400,
         "height": 600,
-        "decorations": false,
+        "minWidth": 360,
+        "minHeight": 400,
+        "decorations": true,
         "transparent": true,
-        "alwaysOnTop": true,
+        "resizable": true,
         "center": false,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {
       "csp": null,
-      "capabilities": ["default"]
+      "capabilities": [
+        "default"
+      ]
     }
   }
 }
