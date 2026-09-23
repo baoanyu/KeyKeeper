@@ -9,7 +9,7 @@ use crate::adapters::qoder::QoderFetcher;
 use crate::adapters::volcano::VolcanoFetcher;
 use crate::adapters::QuotaFetcher;
 use crate::keystore;
-use crate::models::QuotaInfo;
+use crate::models::{PlatformSpec, QuotaInfo, PLATFORM_SPECS};
 use crate::scheduler::fetch_all_quotas;
 
 pub struct AppState {
@@ -197,4 +197,52 @@ pub async fn add_provider(
         save_providers(&app, &providers).await.map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// 从 main.rs 移入 —— CLAUDE.md 一直声明它在 commands.rs，此前代码与文档不符。
+#[tauri::command]
+pub fn check_low_balance(quotas: Vec<serde_json::Value>) -> Vec<String> {
+    let mut low_balance_providers = Vec::new();
+
+    for quota in &quotas {
+        let provider_name = quota.get("provider_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let is_success = quota.get("is_success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        if !is_success {
+            continue;
+        }
+
+        // F9: total is now Option<f64> — None means "unknown total" (wallet-style)
+        let total = quota.get("total").and_then(|v| v.as_f64());
+        let remaining = quota.get("remaining").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let unit = quota.get("quota_unit").and_then(|v| v.as_str()).unwrap_or("unknown");
+
+        // F9: relative rule now reachable — fires when total is known
+        // Bind total once to avoid repeated unwrap_or and make the 10%-of-total rule clear
+        let is_low = match unit {
+            "cny" => remaining < 10.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
+            "tokens" => remaining < 1000.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
+            "seconds" => remaining < 600.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
+            _ => false,
+        };
+
+        if is_low {
+            low_balance_providers.push(provider_name.to_string());
+        }
+    }
+
+    low_balance_providers
+}
+
+/// 返回全部平台元数据（吸收 backlog P2-8）。
+///
+/// 前端据此渲染平台选择器 / Key 提示 / 控制台链接，
+/// **新增平台只需改 `models.rs` 的 `PLATFORM_SPECS` 一处**。
+#[tauri::command]
+pub fn get_platform_specs() -> Vec<PlatformSpec> {
+    PLATFORM_SPECS.to_vec()
 }

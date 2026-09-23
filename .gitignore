@@ -18,6 +18,9 @@ src-tauri/target/
 .DS_Store
 Thumbs.db
 
+# 工具残留
+.mimosa/
+
 # Env
 .env
 .env.local
@@ -29,6 +32,8 @@ pnpm-debug.log*
 
 # Rust toolchain lockfile (optional, can be committed for binaries)
 # src-tauri/Cargo.lock
+
+# 项目文档需纳入版本控制（路线图 / 改造计划是唯一事实来源，不能只存在本地）
+# 注意：/CLAUDE.md 与 /AGENTS.md 仍被忽略，是否纳管见 refactor-plan-v2.md §6
 /CLAUDE.md
-/doc/
 /AGENTS.md
