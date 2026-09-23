@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Entitlement, PlatformStatus, QuotaUnit } from '../types';
 import { daysLeft, entitlementBadge, formatDate, isLowBalance } from '../utils';
 
@@ -76,9 +77,10 @@ const isAuthError = () => {
 
 const isManual = () => props.platform.source === 'manual';
 
+// P1-1: window.open 在 Tauri webview 中静默无效，必须走 opener 插件
 const openConsole = () => {
   if (props.platform.console_url) {
-    window.open(props.platform.console_url, '_blank', 'noopener,noreferrer');
+    openUrl(props.platform.console_url);
   }
 };
 
