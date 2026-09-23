@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use reqwest::Client;
 use std::sync::Arc;
-use crate::models::{PlanType, QuotaInfo, QuotaUnit};
+use crate::models::{Entitlement, QuotaUnit};
 use super::{sanitize_error_body, QuotaFetcher};
 use hmac::{Hmac, Mac};
 use sha2::{Sha256, Digest};
@@ -25,15 +25,16 @@ const VOLCANO_SERVICE: &str = "ark";
 
 #[async_trait]
 impl QuotaFetcher for VolcanoFetcher {
-    async fn fetch_quota(&self, api_key: &str) -> Result<QuotaInfo> {
+    async fn fetch_entitlements(&self, api_key: &str) -> Result<Vec<Entitlement>> {
         let now = chrono::Utc::now();
         let x_date = now.format("%Y%m%dT%H%M%SZ").to_string();
         let date_stamp = now.format("%Y%m%d").to_string();
-        
+
         // Parse API key: format is "AccessKey:SecretKey"
+        // ⚠️ 签名实现已被审计判定错误、端点存疑（见 refactor-plan-v2.md P0-3 / Phase 3），本轮仅做类型迁移
         let parts: Vec<&str> = api_key.split(':').collect();
         if parts.len() != 2 {
-            return Ok(QuotaInfo::error("Volcano", "API Key 格式错误，应为 AccessKey:SecretKey"));
+            return Err(anyhow!("API Key 格式错误，应为 AccessKey:SecretKey"));
         }
         let access_key = parts[0];
         let secret_key = parts[1];
@@ -88,26 +89,19 @@ impl QuotaFetcher for VolcanoFetcher {
                     .and_then(|r| r.as_f64());
 
                 match remaining {
-                    Some(r) => Ok(QuotaInfo {
-                        provider_name: "Volcano".to_string(),
-                        plan_type: PlanType::PayAsYouGo,
-                        quota_unit: QuotaUnit::CNY,
-                        // F8: wallet-style API — total unknown
-                        total: None,
-                        remaining: r,
-                        is_success: true,
-                        error_msg: None,
-                    }),
-                    None => Ok(QuotaInfo::error("Volcano", "响应缺少 data.remaining 字段")),
+                    // F8: wallet-style API — total unknown
+                    Some(r) => Ok(vec![Entitlement::new("余额")
+                        .with_balance(QuotaUnit::CNY, None, r)]),
+                    None => Err(anyhow!("响应缺少 data.remaining 字段")),
                 }
             }
             Ok(resp) => {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
                 let sanitized = sanitize_error_body(&text);
-                Ok(QuotaInfo::error("Volcano", &format!("HTTP {}: {}", status, sanitized)))
+                Err(anyhow!("HTTP {}: {}", status, sanitized))
             }
-            Err(e) => Ok(QuotaInfo::error("Volcano", &e.to_string())),
+            Err(e) => Err(anyhow!(e.to_string())),
         }
     }
 }

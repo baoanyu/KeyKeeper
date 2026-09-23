@@ -17,8 +17,12 @@ pub fn get_key(provider: &str) -> Result<String> {
 
 pub fn delete_key(provider: &str) -> Result<()> {
     let entry = Entry::new(SERVICE_NAME, provider)?;
-    entry.delete_credential()?;
-    Ok(())
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        // P0-1b: 条目已不存在视为删除成功（用户在「钥匙串访问」手动删过 / 换机迁移）
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub fn has_key(provider: &str) -> Result<bool> {

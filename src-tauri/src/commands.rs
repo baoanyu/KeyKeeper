@@ -1,241 +1,199 @@
 use anyhow::Result;
 use tauri::State;
 use tauri_plugin_store::StoreExt;
+use std::collections::HashMap;
 use std::sync::Arc;
 use reqwest::Client;
 use crate::adapters::deepseek::DeepSeekFetcher;
 use crate::adapters::zhipu::ZhipuFetcher;
-use crate::adapters::qoder::QoderFetcher;
 use crate::adapters::volcano::VolcanoFetcher;
-use crate::adapters::QuotaFetcher;
 use crate::keystore;
-use crate::models::{PlatformSpec, QuotaInfo, PLATFORM_SPECS};
-use crate::scheduler::fetch_all_quotas;
+use crate::models::{
+    find_spec, Entitlement, PlatformMode, PlatformSpec, PlatformStatus, Source, PLATFORM_SPECS,
+};
+use crate::scheduler::{fetch_all_platforms, FetchTask};
 
 pub struct AppState {
-    pub providers: tokio::sync::Mutex<Vec<String>>,
     pub http_client: Arc<Client>,
 }
 
-const STORE_KEY: &str = "providers_list";
-const QODER_FIRST_LAUNCH_KEY: &str = "qoder_first_launch";
+const STORE_FILE: &str = "keykeeper-store.json";
+/// 手动录入数据：platform_id → 该平台的额度包列表 + 录入时间
+const MANUAL_PLATFORMS_KEY: &str = "manual_platforms";
 
-async fn load_providers(app: &tauri::AppHandle) -> Vec<String> {
-    let store = match app.store("keykeeper-store.json") {
+/// store 中手动录入条目的持久化结构
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ManualEntry {
+    entitlements: Vec<Entitlement>,
+    updated_at: i64,
+}
+
+type ManualMap = HashMap<String, ManualEntry>;
+
+fn load_manual_map(app: &tauri::AppHandle) -> ManualMap {
+    let store = match app.store(STORE_FILE) {
         Ok(s) => s,
         Err(e) => {
-            // P3-4: log instead of silently returning empty
             log::warn!("Failed to open store: {}", e);
-            return Vec::new();
+            return ManualMap::new();
         }
     };
-    let value = store.get(STORE_KEY);
-    if let Some(value) = value {
-        match serde_json::from_value::<Vec<String>>(value.clone()) {
-            Ok(providers) => return providers,
+    match store.get(MANUAL_PLATFORMS_KEY) {
+        Some(value) => match serde_json::from_value::<ManualMap>(value.clone()) {
+            Ok(map) => map,
             Err(e) => {
-                // P3-4: log corrupted store data
-                log::warn!("Failed to parse providers from store: {}", e);
+                log::warn!("Failed to parse manual_platforms from store: {}", e);
+                ManualMap::new()
             }
-        }
+        },
+        None => ManualMap::new(),
     }
-    Vec::new()
 }
 
-async fn save_providers(app: &tauri::AppHandle, providers: &[String]) -> Result<()> {
-    let store = app.store("keykeeper-store.json")?;
-    store.set(STORE_KEY, serde_json::to_value(providers)?);
+fn save_manual_map(app: &tauri::AppHandle, map: &ManualMap) -> Result<()> {
+    let store = app.store(STORE_FILE)?;
+    store.set(MANUAL_PLATFORMS_KEY, serde_json::to_value(map)?);
     store.save()?;
     Ok(())
 }
 
-async fn get_qoder_first_launch(app: &tauri::AppHandle) -> Option<f64> {
-    let store = app.store("keykeeper-store.json").ok()?;
-    let value = store.get(QODER_FIRST_LAUNCH_KEY)?;
-    value.as_f64()
-}
-
-async fn set_qoder_first_launch(app: &tauri::AppHandle, timestamp: f64) -> Result<()> {
-    let store = app.store("keykeeper-store.json")?;
-    store.set(QODER_FIRST_LAUNCH_KEY, serde_json::to_value(timestamp)?);
-    store.save()?;
-    Ok(())
-}
-
-async fn ensure_providers_loaded(state: &AppState, app: &tauri::AppHandle) -> Vec<String> {
-    let guard = state.providers.lock().await;
-    if guard.is_empty() {
-        drop(guard);
-        let stored = load_providers(app).await;
-        let mut guard = state.providers.lock().await;
-        *guard = stored;
-        guard.clone()
-    } else {
-        guard.clone()
+/// 校验 id 是 Manual 模式的已知平台，返回其 spec
+fn manual_spec(id: &str) -> Result<&'static PlatformSpec, String> {
+    match find_spec(id) {
+        Some(spec) if spec.mode == PlatformMode::Manual => Ok(spec),
+        Some(spec) => Err(format!("{} 不是手动录入平台", spec.display_name)),
+        None => Err(format!("未知平台: {}", id)),
     }
 }
 
+/// 校验 id 是 Api 模式的已知平台，返回其 spec
+fn api_spec(id: &str) -> Result<&'static PlatformSpec, String> {
+    match find_spec(id) {
+        Some(spec) if spec.mode == PlatformMode::Api => Ok(spec),
+        Some(spec) => Err(format!("{} 不是 API 平台", spec.display_name)),
+        None => Err(format!("未知平台: {}", id)),
+    }
+}
+
+/// 汇总所有平台状态：Api 平台并发查询，Manual 平台从 store 读取。
+/// 未配置的平台（Api 无 Key / Manual 无录入）不出现在结果中。
 #[tauri::command]
-pub async fn get_all_quotas(
+pub async fn get_all_platforms(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-) -> Result<Vec<QuotaInfo>, String> {
-    let providers = ensure_providers_loaded(&state, &app).await;
+) -> Result<Vec<PlatformStatus>, String> {
+    let mut statuses: Vec<PlatformStatus> = Vec::new();
+    let mut tasks = Vec::new();
 
-    // F5: only seed Qoder first_launch if Qoder is actually configured
-    let qoder_configured = providers.contains(&"Qoder".to_string());
-    let qoder_first_launch = if qoder_configured {
-        let stored = get_qoder_first_launch(&app).await;
-        match stored {
-            Some(t) => Some(t),
-            None => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs_f64();
-                // P2-3: log persistence failure instead of silent `let _`
-                if let Err(e) = set_qoder_first_launch(&app, now).await {
-                    log::error!("Failed to persist Qoder first launch time: {}", e);
-                }
-                Some(now)
-            }
-        }
-    } else {
-        None
-    };
-    
-    let client = state.http_client.clone();
-    let mut tasks: Vec<(String, String, Box<dyn QuotaFetcher>)> = Vec::new();
-
-    for provider in &providers {
-        match keystore::get_key(provider) {
-            Ok(api_key) => {
-                let fetcher: Box<dyn QuotaFetcher> = if provider == "DeepSeek" {
-                    Box::new(DeepSeekFetcher::new(client.clone()))
-                } else if provider == "ZhipuAI" {
-                    Box::new(ZhipuFetcher::new(client.clone()))
-                } else if provider == "Qoder" {
-                    Box::new(QoderFetcher::new(qoder_first_launch))
-                } else if provider == "Volcano" {
-                    Box::new(VolcanoFetcher::new(client.clone()))
-                } else {
-                    log::warn!("Unknown provider: {}", provider);
-                    continue;
+    for spec in PLATFORM_SPECS {
+        match spec.mode {
+            PlatformMode::Api => {
+                let api_key = match keystore::get_key(spec.id) {
+                    Ok(key) => key,
+                    Err(_) => continue, // 未配置 Key 的平台不显示
                 };
-                tasks.push((provider.clone(), api_key, fetcher));
+                let fetcher: Box<dyn crate::adapters::QuotaFetcher> = match spec.id {
+                    "deepseek" => Box::new(DeepSeekFetcher::new(state.http_client.clone())),
+                    "zhipu" => Box::new(ZhipuFetcher::new(state.http_client.clone())),
+                    "volcano" => Box::new(VolcanoFetcher::new(state.http_client.clone())),
+                    _ => {
+                        log::warn!("No fetcher registered for api platform: {}", spec.id);
+                        continue;
+                    }
+                };
+                tasks.push(FetchTask { spec, api_key, fetcher });
             }
-            Err(e) => {
-                log::warn!("Failed to get key for {}: {}", provider, e);
+            PlatformMode::Manual => {
+                let map = load_manual_map(&app);
+                if let Some(entry) = map.get(spec.id) {
+                    statuses.push(PlatformStatus {
+                        id: spec.id.to_string(),
+                        display_name: spec.display_name.to_string(),
+                        source: Source::Manual,
+                        entitlements: entry.entitlements.clone(),
+                        console_url: crate::models::non_empty(spec.console_url),
+                        error: None,
+                        updated_at: entry.updated_at,
+                    });
+                }
             }
         }
     }
 
-    let results = fetch_all_quotas(tasks).await;
-    Ok(results)
+    let api_statuses = fetch_all_platforms(tasks).await;
+    statuses.extend(api_statuses);
+    Ok(statuses)
 }
 
-// F1 (P0 fix): expose key retrieval so frontend can snapshot before reconfigure
+/// 保存 Api 平台的 Key（Keychain 以平台 id 为条目名）
 #[tauri::command]
-pub async fn get_provider_key(provider: String) -> Result<String, String> {
-    keystore::get_key(&provider).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn save_provider_key(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-    provider: String,
-    key: String,
-) -> Result<(), String> {
-    keystore::save_key(&provider, &key).map_err(|e| e.to_string())?;
-
-    let mut providers = state.providers.lock().await;
-    if !providers.contains(&provider) {
-        providers.push(provider);
-        save_providers(&app, &providers).await.map_err(|e| e.to_string())?;
+pub async fn save_api_key(id: String, key: String) -> Result<(), String> {
+    api_spec(&id)?;
+    if key.trim().is_empty() {
+        return Err("Key 不能为空".to_string());
     }
-    Ok(())
+    keystore::save_key(&id, &key).map_err(|e| e.to_string())
 }
 
+/// 读取 Api 平台的 Key（用于重配置时快照旧 Key）
 #[tauri::command]
-pub async fn delete_provider(
-    state: State<'_, AppState>,
+pub async fn get_api_key(id: String) -> Result<String, String> {
+    api_spec(&id)?;
+    keystore::get_key(&id).map_err(|e| e.to_string())
+}
+
+/// 删除平台：Api 删 Keychain Key，Manual 删 store 录入条目。
+/// Keychain 条目缺失时视为删除成功（P0-1b）。
+#[tauri::command]
+pub async fn delete_platform(
     app: tauri::AppHandle,
-    provider: String,
+    id: String,
 ) -> Result<(), String> {
-    keystore::delete_key(&provider).map_err(|e| e.to_string())?;
-
-    let mut providers = state.providers.lock().await;
-    providers.retain(|p| p != &provider);
-    save_providers(&app, &providers).await.map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn get_saved_providers(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<Vec<String>, String> {
-    Ok(ensure_providers_loaded(&state, &app).await)
-}
-
-#[tauri::command]
-pub async fn add_provider(
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-    provider: String,
-) -> Result<(), String> {
-    // Guard: only register a provider if its key actually exists in Keychain.
-    // This prevents adding a provider that would silently fail on every refresh.
-    if !keystore::has_key(&provider).map_err(|e| e.to_string())? {
-        return Err(format!("无法添加 {}：Keychain 中未找到该平台的 API Key", provider));
-    }
-
-    let mut providers = state.providers.lock().await;
-    if !providers.contains(&provider) {
-        providers.push(provider);
-        save_providers(&app, &providers).await.map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-// 从 main.rs 移入 —— CLAUDE.md 一直声明它在 commands.rs，此前代码与文档不符。
-#[tauri::command]
-pub fn check_low_balance(quotas: Vec<serde_json::Value>) -> Vec<String> {
-    let mut low_balance_providers = Vec::new();
-
-    for quota in &quotas {
-        let provider_name = quota.get("provider_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown");
-        let is_success = quota.get("is_success")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        if !is_success {
-            continue;
-        }
-
-        // F9: total is now Option<f64> — None means "unknown total" (wallet-style)
-        let total = quota.get("total").and_then(|v| v.as_f64());
-        let remaining = quota.get("remaining").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let unit = quota.get("quota_unit").and_then(|v| v.as_str()).unwrap_or("unknown");
-
-        // F9: relative rule now reachable — fires when total is known
-        // Bind total once to avoid repeated unwrap_or and make the 10%-of-total rule clear
-        let is_low = match unit {
-            "cny" => remaining < 10.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
-            "tokens" => remaining < 1000.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
-            "seconds" => remaining < 600.0 || matches!(total, Some(t) if t > 0.0 && remaining < t * 0.1),
-            _ => false,
-        };
-
-        if is_low {
-            low_balance_providers.push(provider_name.to_string());
+    let spec = find_spec(&id).ok_or_else(|| format!("未知平台: {}", id))?;
+    match spec.mode {
+        PlatformMode::Api => keystore::delete_key(&id).map_err(|e| e.to_string()),
+        PlatformMode::Manual => {
+            let mut map = load_manual_map(&app);
+            map.remove(&id);
+            save_manual_map(&app, &map).map_err(|e| e.to_string())
         }
     }
+}
 
-    low_balance_providers
+/// 覆盖式保存手动录入的额度包列表（新增 / 编辑 / 续费统一入口）。
+/// 保存空列表等价于删除该平台的录入数据。
+/// 错误必须传播到前端 —— 静默吞掉会导致内存与磁盘不一致（见 CLAUDE.md 错误传播模式）。
+#[tauri::command]
+pub async fn save_manual_platform(
+    app: tauri::AppHandle,
+    id: String,
+    entitlements: Vec<Entitlement>,
+) -> Result<(), String> {
+    manual_spec(&id)?;
+    let mut map = load_manual_map(&app);
+    if entitlements.is_empty() {
+        map.remove(&id);
+    } else {
+        map.insert(
+            id,
+            ManualEntry {
+                entitlements,
+                updated_at: crate::models::now_ts(),
+            },
+        );
+    }
+    save_manual_map(&app, &map).map_err(|e| e.to_string())
+}
+
+/// 读取指定平台的手动录入额度包（编辑表单初始化用）
+#[tauri::command]
+pub async fn get_manual_platform(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<Vec<Entitlement>, String> {
+    manual_spec(&id)?;
+    let map = load_manual_map(&app);
+    Ok(map.get(&id).map(|e| e.entitlements.clone()).unwrap_or_default())
 }
 
 /// 返回全部平台元数据（吸收 backlog P2-8）。
@@ -245,4 +203,40 @@ pub fn check_low_balance(quotas: Vec<serde_json::Value>) -> Vec<String> {
 #[tauri::command]
 pub fn get_platform_specs() -> Vec<PlatformSpec> {
     PLATFORM_SPECS.to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 手动录入的持久化契约：serde 往返不丢字段
+    /// （1.3 验证标准「重启后录入的到期日仍在」依赖此往返）
+    #[test]
+    fn manual_map_serde_round_trip() {
+        let mut map = ManualMap::new();
+        map.insert(
+            "chaosuan-deepseek".to_string(),
+            ManualEntry {
+                entitlements: vec![
+                    Entitlement::new("0.1").with_expires(1761148799),
+                    Entitlement::new("10M 体验").with_expires(1761148799),
+                ],
+                updated_at: 1758556800,
+            },
+        );
+        let json = serde_json::to_string(&map).unwrap();
+        let back: ManualMap = serde_json::from_str(&json).unwrap();
+        let entry = back.get("chaosuan-deepseek").unwrap();
+        assert_eq!(entry.entitlements.len(), 2);
+        assert_eq!(entry.entitlements[0].label, "0.1");
+        assert_eq!(entry.entitlements[0].expires_at, Some(1761148799));
+        assert_eq!(entry.updated_at, 1758556800);
+    }
+
+    /// 空 store 键应回退为空 map，而不是解析失败
+    #[test]
+    fn manual_map_deserializes_from_empty_object() {
+        let map: ManualMap = serde_json::from_str("{}").unwrap();
+        assert!(map.is_empty());
+    }
 }

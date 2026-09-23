@@ -43,6 +43,37 @@ pub struct Entitlement {
     pub note: Option<String>,
 }
 
+impl Entitlement {
+    /// 便捷构造：只有标签，其余字段可选
+    pub fn new(label: &str) -> Self {
+        Self {
+            label: label.to_string(),
+            expires_at: None,
+            unit: QuotaUnit::Unknown,
+            total: None,
+            remaining: None,
+            note: None,
+        }
+    }
+
+    pub fn with_expires(mut self, expires_at: i64) -> Self {
+        self.expires_at = Some(expires_at);
+        self
+    }
+
+    pub fn with_balance(mut self, unit: QuotaUnit, total: Option<f64>, remaining: f64) -> Self {
+        self.unit = unit;
+        self.total = total;
+        self.remaining = Some(remaining);
+        self
+    }
+
+    pub fn with_note(mut self, note: &str) -> Self {
+        self.note = Some(note.to_string());
+        self
+    }
+}
+
 /// 一个平台的完整状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformStatus {
@@ -87,7 +118,8 @@ pub fn now_ts() -> i64 {
         .as_secs() as i64
 }
 
-fn non_empty(s: &str) -> Option<String> {
+/// 空字符串归一为 None（console_url 等字段可留空）
+pub fn non_empty(s: &str) -> Option<String> {
     if s.is_empty() {
         None
     } else {
@@ -208,43 +240,6 @@ pub const PLATFORM_SPECS: &[PlatformSpec] = &[
 
 pub fn find_spec(id: &str) -> Option<&'static PlatformSpec> {
     PLATFORM_SPECS.iter().find(|s| s.id == id)
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 旧模型 —— 待 Phase 1 迁移完成后删除
-// ═══════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PlanType {
-    PayAsYouGo,
-    CodingPlan,
-    Subscription,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuotaInfo {
-    pub provider_name: String,
-    pub plan_type: PlanType,
-    pub quota_unit: QuotaUnit,
-    pub total: Option<f64>,
-    pub remaining: f64,
-    pub is_success: bool,
-    pub error_msg: Option<String>,
-}
-
-impl QuotaInfo {
-    pub fn error(provider_name: &str, error_msg: &str) -> Self {
-        Self {
-            provider_name: provider_name.to_string(),
-            plan_type: PlanType::PayAsYouGo,
-            quota_unit: QuotaUnit::Unknown,
-            total: None,
-            remaining: 0.0,
-            is_success: false,
-            error_msg: Some(error_msg.to_string()),
-        }
-    }
 }
 
 #[cfg(test)]

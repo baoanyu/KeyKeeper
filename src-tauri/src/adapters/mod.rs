@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use anyhow::Result;
-use crate::models::QuotaInfo;
+use crate::models::Entitlement;
 
 #[async_trait]
 pub trait QuotaFetcher: Send + Sync {
-    async fn fetch_quota(&self, api_key: &str) -> Result<QuotaInfo>;
+    /// 查询该平台的额度包列表（Api 平台通常只有一个）。
+    /// 查询失败返回 `Err`，由调度层转为 `PlatformStatus::failed`。
+    async fn fetch_entitlements(&self, api_key: &str) -> Result<Vec<Entitlement>>;
 }
 
 /// Sanitize an error response body to avoid leaking credentials that some
@@ -30,5 +32,4 @@ pub fn sanitize_error_body(body: &str) -> String {
 
 pub mod deepseek;
 pub mod zhipu;
-pub mod qoder;
 pub mod volcano;

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use reqwest::Client;
 use std::sync::Arc;
-use crate::models::{PlanType, QuotaInfo, QuotaUnit};
+use crate::models::{Entitlement, QuotaUnit};
 use super::{sanitize_error_body, QuotaFetcher};
 
 pub struct DeepSeekFetcher {
@@ -17,7 +17,7 @@ impl DeepSeekFetcher {
 
 #[async_trait]
 impl QuotaFetcher for DeepSeekFetcher {
-    async fn fetch_quota(&self, api_key: &str) -> Result<QuotaInfo> {
+    async fn fetch_entitlements(&self, api_key: &str) -> Result<Vec<Entitlement>> {
         let resp = self.client
             .get("https://api.deepseek.com/user/balance")
             .bearer_auth(api_key)
@@ -28,7 +28,7 @@ impl QuotaFetcher for DeepSeekFetcher {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             let sanitized = sanitize_error_body(&text);
-            return Ok(QuotaInfo::error("DeepSeek", &format!("HTTP {}: {}", status, sanitized)));
+            return Err(anyhow!("HTTP {}: {}", status, sanitized));
         }
 
         let json: serde_json::Value = resp.json().await?;
@@ -44,30 +44,11 @@ impl QuotaFetcher for DeepSeekFetcher {
             });
 
         match balance {
-            Some(b) => Ok(QuotaInfo {
-                provider_name: "DeepSeek".to_string(),
-                plan_type: PlanType::PayAsYouGo,
-                quota_unit: QuotaUnit::CNY,
-                // F8: wallet-style API — total unknown, don't fabricate total == remaining
-                total: None,
-                remaining: b,
-                is_success: true,
-                error_msg: None,
-            }),
-            None => Ok(QuotaInfo::error("DeepSeek", "响应缺少 data.balance 字段")),
+            // F8: wallet-style API — total unknown, don't fabricate total == remaining
+            // ⚠️ data.balance 字段真实性待验证（见 refactor-plan-v2.md §3.2，Phase 3 处理）
+            Some(b) => Ok(vec![Entitlement::new("余额")
+                .with_balance(QuotaUnit::CNY, None, b)]),
+            None => Err(anyhow!("响应缺少 data.balance 字段")),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_creation() {
-        let error = QuotaInfo::error("DeepSeek", "test error");
-        assert_eq!(error.provider_name, "DeepSeek");
-        assert!(!error.is_success);
-        assert_eq!(error.error_msg, Some("test error".to_string()));
     }
 }

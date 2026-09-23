@@ -7,14 +7,13 @@ pub mod commands;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
 use tauri::menu::{Menu, MenuItem};
 use tauri::{Manager, WebviewWindow, WindowEvent, Emitter};
-use tokio::sync::Mutex as TokioMutex;
 use std::sync::Arc;
 use std::time::Duration;
 use reqwest::Client;
 
 use commands::{
-    get_all_quotas, save_provider_key, delete_provider, get_saved_providers,
-    add_provider, get_provider_key, check_low_balance, get_platform_specs, AppState,
+    get_all_platforms, save_api_key, get_api_key, delete_platform,
+    save_manual_platform, get_manual_platform, get_platform_specs, AppState,
 };
 
 const AUTO_REFRESH_INTERVAL_SECS: u64 = 300; // 5 minutes
@@ -35,7 +34,6 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .manage(AppState {
-            providers: TokioMutex::new(Vec::new()),
             http_client,
         })
         .setup(|app| {
@@ -104,13 +102,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_all_quotas,
-            save_provider_key,
-            delete_provider,
-            get_saved_providers,
-            add_provider,
-            get_provider_key,
-            check_low_balance,
+            get_all_platforms,
+            save_api_key,
+            get_api_key,
+            delete_platform,
+            save_manual_platform,
+            get_manual_platform,
             get_platform_specs,
         ])
         .run(tauri::generate_context!())
