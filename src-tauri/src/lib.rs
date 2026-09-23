@@ -33,6 +33,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             http_client,
+            manual_write_lock: tokio::sync::Mutex::new(()),
         })
         // §1.4 决策：关窗即退出应用（无后台进程，系统通知已随之移除）
         .on_window_event(|window, event| {

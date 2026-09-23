@@ -1,0 +1,17 @@
+{
+  "ResponseMetadata": {
+    "RequestId": "202201011234567890123456789012345",
+    "Action": "QueryBalanceAcct",
+    "Version": "2022-01-01",
+    "Service": "billing",
+    "Region": "cn-beijing"
+  },
+  "Result": {
+    "AccountID": 210000000001,
+    "ArrearsBalance": "1.01",
+    "AvailableBalance": "77.01",
+    "CashBalance": "83.01",
+    "CreditLimit": "0.01",
+    "FreezeAmount": "5.01"
+  }
+}

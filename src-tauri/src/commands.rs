@@ -15,6 +15,8 @@ use crate::scheduler::{fetch_all_platforms, FetchTask};
 
 pub struct AppState {
     pub http_client: Arc<Client>,
+    /// R-6：手动录入读-改-写串行化，防止并发保存互相覆盖丢条目
+    pub manual_write_lock: tokio::sync::Mutex<()>,
 }
 
 const STORE_FILE: &str = "keykeeper-store.json";
@@ -52,9 +54,25 @@ fn load_manual_map(app: &tauri::AppHandle) -> ManualMap {
 
 fn save_manual_map(app: &tauri::AppHandle, map: &ManualMap) -> Result<()> {
     let store = app.store(STORE_FILE)?;
+    // R-6：保存前留存旧值，落盘失败时回滚内存态，
+    // 避免"界面显示已保存、重启后回退"的二次困惑。
+    let previous = store.get(MANUAL_PLATFORMS_KEY);
     store.set(MANUAL_PLATFORMS_KEY, serde_json::to_value(map)?);
-    store.save()?;
+    if let Err(e) = store.save() {
+        if let Some(prev) = previous {
+            store.set(MANUAL_PLATFORMS_KEY, prev);
+        }
+        return Err(anyhow::anyhow!(e));
+    }
     Ok(())
+}
+
+/// R-7：判断 anyhow 错误链中是否为 Keychain「条目不存在」
+fn is_no_entry(e: &anyhow::Error) -> bool {
+    matches!(
+        e.downcast_ref::<keyring::Error>(),
+        Some(keyring::Error::NoEntry)
+    )
 }
 
 /// 校验 id 是 Manual 模式的已知平台，返回其 spec
@@ -85,12 +103,24 @@ pub async fn get_all_platforms(
     let mut statuses: Vec<PlatformStatus> = Vec::new();
     let mut tasks = Vec::new();
 
+    // R-10：手动录入 map 只加载一次（旧实现在循环内对每个 Manual 平台重复反序列化）
+    let manual_map = load_manual_map(&app);
+
     for spec in PLATFORM_SPECS {
         match spec.mode {
             PlatformMode::Api => {
                 let api_key = match keystore::get_key(spec.id) {
                     Ok(key) => key,
-                    Err(_) => continue, // 未配置 Key 的平台不显示
+                    // R-7：NoEntry = 未配置，跳过；其他 Keychain 错误要显式兜底
+                    Err(e) if is_no_entry(&e) => continue,
+                    Err(e) => {
+                        log::warn!("Keychain read failed for {}: {}", spec.id, e);
+                        statuses.push(PlatformStatus::failed(
+                            spec,
+                            &format!("Keychain 读取失败: {e}"),
+                        ));
+                        continue;
+                    }
                 };
                 let fetcher: Box<dyn crate::adapters::QuotaFetcher> = match spec.id {
                     "deepseek" => Box::new(DeepSeekFetcher::new(state.http_client.clone())),
@@ -104,8 +134,7 @@ pub async fn get_all_platforms(
                 tasks.push(FetchTask { spec, api_key, fetcher });
             }
             PlatformMode::Manual => {
-                let map = load_manual_map(&app);
-                if let Some(entry) = map.get(spec.id) {
+                if let Some(entry) = manual_map.get(spec.id) {
                     statuses.push(PlatformStatus {
                         id: spec.id.to_string(),
                         display_name: spec.display_name.to_string(),
@@ -146,6 +175,7 @@ pub async fn get_api_key(id: String) -> Result<String, String> {
 /// Keychain 条目缺失时视为删除成功（P0-1b）。
 #[tauri::command]
 pub async fn delete_platform(
+    state: State<'_, AppState>,
     app: tauri::AppHandle,
     id: String,
 ) -> Result<(), String> {
@@ -153,6 +183,8 @@ pub async fn delete_platform(
     match spec.mode {
         PlatformMode::Api => keystore::delete_key(&id).map_err(|e| e.to_string()),
         PlatformMode::Manual => {
+            // R-6：与其他写入互斥
+            let _guard = state.manual_write_lock.lock().await;
             let mut map = load_manual_map(&app);
             map.remove(&id);
             save_manual_map(&app, &map).map_err(|e| e.to_string())
@@ -165,11 +197,14 @@ pub async fn delete_platform(
 /// 错误必须传播到前端 —— 静默吞掉会导致内存与磁盘不一致（见 CLAUDE.md 错误传播模式）。
 #[tauri::command]
 pub async fn save_manual_platform(
+    state: State<'_, AppState>,
     app: tauri::AppHandle,
     id: String,
     entitlements: Vec<Entitlement>,
 ) -> Result<(), String> {
     manual_spec(&id)?;
+    // R-6：读-改-写全程持锁，防止并发保存不同平台时后写覆盖先写
+    let _guard = state.manual_write_lock.lock().await;
     let mut map = load_manual_map(&app);
     if entitlements.is_empty() {
         map.remove(&id);

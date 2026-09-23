@@ -51,6 +51,7 @@ function submit() {
     total: null,
     remaining: null,
     note: null,
+    used_percent: null,
   }));
   emit('save', entitlements);
 }
@@ -68,12 +69,12 @@ function submit() {
           <input
             v-model="row.label"
             placeholder="额度包名（可选）"
-            class="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5"
+            class="flex-1 min-w-0 text-xs border border-neutral-400 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
           <input
             v-model="row.date"
             type="date"
-            class="text-xs border rounded px-2 py-1.5"
+            class="text-xs border border-neutral-400 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             :class="rowError(row) ? 'border-red-400 bg-red-50' : 'border-gray-300'"
           />
         </div>
@@ -81,14 +82,14 @@ function submit() {
           <button
             type="button"
             @click="row.date = dateInputInDays(30)"
-            class="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition"
+            class="text-xs px-1.5 py-0.5 bg-neutral-200 text-neutral-800 rounded hover:bg-neutral-300 transition font-medium"
           >
             +30 天
           </button>
           <button
             type="button"
             @click="row.date = dateInputInDays(7)"
-            class="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition"
+            class="text-xs px-1.5 py-0.5 bg-neutral-200 text-neutral-800 rounded hover:bg-neutral-300 transition font-medium"
           >
             +7 天
           </button>

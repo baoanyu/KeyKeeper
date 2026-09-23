@@ -41,6 +41,10 @@ pub struct Entitlement {
     pub remaining: Option<f64>,
     /// 备注 / 估算说明
     pub note: Option<String>,
+    /// R-5（模型 v2.1）：已用百分比（0–100），用于智谱/方舟类
+    /// "配额窗口"接口；存在时卡片主文案为"已用 X%"，expires_at 语义为重置时刻。
+    #[serde(default)]
+    pub used_percent: Option<f64>,
 }
 
 impl Entitlement {
@@ -53,6 +57,7 @@ impl Entitlement {
             total: None,
             remaining: None,
             note: None,
+            used_percent: None,
         }
     }
 
@@ -70,6 +75,12 @@ impl Entitlement {
 
     pub fn with_note(mut self, note: &str) -> Self {
         self.note = Some(note.to_string());
+        self
+    }
+
+    /// R-5：设置已用百分比
+    pub fn with_used_percent(mut self, used_percent: f64) -> Self {
+        self.used_percent = Some(used_percent);
         self
     }
 }

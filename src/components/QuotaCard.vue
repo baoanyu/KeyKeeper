@@ -31,8 +31,38 @@ const usagePercent = (e: Entitlement) => {
   return Math.min(100, Math.max(0, ((e.total - e.remaining) / e.total) * 100));
 };
 
-// §2.5 主信息：有 expires_at 显示倒计时，否则显示余额
+// R-5: 百分比型用量（智谱/方舟）的进度条宽度直接取 used_percent
+const barWidth = (e: Entitlement): number =>
+  e.used_percent != null
+    ? Math.min(100, Math.max(0, e.used_percent))
+    : usagePercent(e);
+
+// R-12: 进度条颜色统一映射（红/橙/蓝），覆盖到期与百分比两种来源
+const barColor = (e: Entitlement): string => {
+  if (e.used_percent != null) {
+    if (e.used_percent >= 95) return 'bg-red-500';
+    if (e.used_percent >= 80) return 'bg-orange-500';
+    return 'bg-blue-500';
+  }
+  switch (entitlementBadge(e)) {
+    case 'red': return 'bg-red-500';
+    case 'orange': return 'bg-orange-500';
+    default: return 'bg-blue-500';
+  }
+};
+
+// R-5: 配额窗口重置倒计时（expires_at 在百分比型语义下为重置时刻）
+function resetText(ts: number): string {
+  const ms = ts * 1000 - Date.now();
+  if (ms <= 0) return '即将重置';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return h > 0 ? `${h}h${m}m 后重置` : `${m}m 后重置`;
+};
+
+// §2.5 主信息：百分比型优先，其次到期倒计时，最后余额
 function mainText(e: Entitlement): string {
+  if (e.used_percent != null) return `已用 ${Math.round(e.used_percent)}%`;
   if (e.expires_at != null) {
     const d = daysLeft(e.expires_at);
     if (d > 0) return `还剩 ${d} 天`;
@@ -46,6 +76,13 @@ function mainText(e: Entitlement): string {
 }
 
 function subText(e: Entitlement): string {
+  // R-5: 百分比型显示"重置倒计时 · 窗口名"，而非"到期"
+  if (e.used_percent != null) {
+    const pctParts: string[] = [];
+    if (e.expires_at != null) pctParts.push(resetText(e.expires_at));
+    if (e.label) pctParts.push(e.label);
+    return pctParts.join(' · ');
+  }
   const parts: string[] = [];
   if (e.expires_at != null) {
     parts.push(`${formatDate(e.expires_at)} 到期`);
@@ -88,13 +125,13 @@ const anyLow = () => props.platform.entitlements.some(isLowBalance);
 </script>
 
 <template>
-  <div class="bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
+  <div class="bg-white rounded-xl border border-neutral-300 p-3 shadow-md">
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-2">
-        <span class="font-medium text-sm">{{ platform.display_name }}</span>
+        <span class="font-semibold text-sm text-neutral-900">{{ platform.display_name }}</span>
         <span
           v-if="isManual()"
-          class="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200"
+          class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-medium"
         >
           手动
         </span>
@@ -128,18 +165,18 @@ const anyLow = () => props.platform.entitlements.some(isLowBalance);
 
     <!-- 平台级错误（查询失败 / Key 失效） -->
     <div v-if="platform.error" class="space-y-2">
-      <p class="text-red-500 text-xs">{{ platform.error }}</p>
+      <p class="text-red-600 text-xs font-medium">{{ platform.error }}</p>
       <div class="flex flex-wrap gap-2">
         <button
           v-if="isAuthError()"
           @click="emit('reconfigure', platform.id)"
-          class="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition"
+          class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
         >
           重新配置 Key
         </button>
         <button
           @click="emit('retry')"
-          class="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition"
+          class="text-xs px-2 py-1 bg-neutral-200 text-neutral-800 rounded hover:bg-neutral-300 transition font-medium"
         >
           重试
         </button>
@@ -150,25 +187,25 @@ const anyLow = () => props.platform.entitlements.some(isLowBalance);
     <div v-else class="space-y-2">
       <div v-for="(e, i) in platform.entitlements" :key="i" class="space-y-1">
         <div class="flex justify-between items-baseline text-xs">
-          <span class="font-medium" :class="badgeClass(e)">{{ mainText(e) }}</span>
-          <span v-if="lowTag(e)" class="text-orange-500 font-medium">低额度</span>
+          <span class="font-semibold" :class="badgeClass(e)">{{ mainText(e) }}</span>
+          <span v-if="lowTag(e)" class="text-orange-600 font-semibold">低额度</span>
         </div>
-        <p v-if="subText(e)" class="text-xs text-gray-500">{{ subText(e) }}</p>
-        <!-- 进度条：total 已知时 -->
-        <div v-if="hasTotal(e)" class="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+        <p v-if="subText(e)" class="text-xs text-neutral-600">{{ subText(e) }}</p>
+        <!-- 进度条：total 已知，或百分比型用量（R-5） -->
+        <div v-if="hasTotal(e) || e.used_percent != null" class="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
           <div
             class="h-full rounded-full transition-all duration-300"
-            :class="entitlementBadge(e) ? 'bg-orange-500' : 'bg-blue-500'"
-            :style="{ width: usagePercent(e) + '%' }"
+            :class="barColor(e)"
+            :style="{ width: barWidth(e) + '%' }"
           />
         </div>
-        <p v-if="e.note" class="text-xs text-gray-400 italic">≈ {{ e.note }}</p>
+        <p v-if="e.note" class="text-xs text-neutral-500 italic">≈ {{ e.note }}</p>
       </div>
 
       <button
         v-if="anyLow() && platform.console_url"
         @click="openConsole"
-        class="mt-1 w-full text-xs py-1.5 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 transition"
+        class="mt-1 w-full text-xs py-1.5 bg-orange-600 text-white rounded hover:bg-orange-700 transition font-medium"
       >
         立即充值
       </button>

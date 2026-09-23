@@ -18,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   addApi: [id: string, key: string];
   saveManual: [id: string, entitlements: Entitlement[]];
+  cancelReconfigure: [];
 }>();
 
 const showForm = ref(true);
@@ -90,7 +91,7 @@ function submitManual(entitlements: Entitlement[]) {
       v-if="!showForm"
       @click="showForm = true"
       :disabled="disabled"
-      class="w-full py-2 text-sm text-blue-600 border border-dashed border-blue-300 rounded-lg hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      class="w-full py-2 text-sm text-blue-700 border border-blue-600 rounded-lg hover:bg-blue-50 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
     >
       + 添加平台
     </button>
@@ -101,7 +102,7 @@ function submitManual(entitlements: Entitlement[]) {
       <select
         v-model="selectedId"
         :disabled="disabled || !!preselected"
-        class="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-white disabled:opacity-50"
+        class="w-full text-sm border border-neutral-400 rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
       >
         <option v-for="s in availableSpecs" :key="s.id" :value="s.id">
           {{ s.display_name }}{{ s.mode === 'manual' ? '（手动录入）' : '' }}
@@ -115,7 +116,7 @@ function submitManual(entitlements: Entitlement[]) {
           type="password"
           :placeholder="currentSpec.key_hint"
           :disabled="disabled"
-          class="w-full text-sm border rounded px-2 py-1.5 disabled:opacity-50"
+          class="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
           :class="keyError ? 'border-red-400 bg-red-50' : 'border-gray-300'"
           @keyup.enter="submitKey"
         />
@@ -128,7 +129,6 @@ function submitManual(entitlements: Entitlement[]) {
             target="_blank"
             rel="noopener noreferrer"
             class="text-blue-500 hover:underline"
-            @click.stop
           >
             ↳ 如何获取？{{ currentSpec.display_name }} API Key
           </a>
@@ -142,8 +142,7 @@ function submitManual(entitlements: Entitlement[]) {
             {{ preselected ? '更新 Key' : '添加' }}
           </button>
           <button
-            v-if="!preselected"
-            @click="showForm = false"
+            @click="preselected ? emit('cancelReconfigure') : (showForm = false)"
             :disabled="disabled"
             class="py-1.5 px-3 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50"
           >
@@ -151,14 +150,14 @@ function submitManual(entitlements: Entitlement[]) {
           </button>
         </div>
         <!-- U-17: privacy notice -->
-        <p class="mt-2 text-xs text-gray-400 leading-relaxed">
+        <p class="mt-2 text-xs text-neutral-500 leading-relaxed">
           🔒 你的 API Key 存储在 macOS Keychain 中，KeyKeeper 永不上传。
         </p>
       </div>
 
-      <!-- Manual 平台：到期日录入（§2.6） -->
+      <!-- Manual 平台：到期日录入（§2.6）；key 保证切换平台时表单重置（R-17） -->
       <div v-else>
-        <ManualEntryForm @save="submitManual" @cancel="showForm = false" />
+        <ManualEntryForm :key="selectedId" @save="submitManual" @cancel="showForm = false" />
       </div>
     </div>
   </div>

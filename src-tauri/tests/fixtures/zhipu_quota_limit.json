@@ -1,0 +1,25 @@
+{
+  "code": 200,
+  "data": {
+    "limits": [
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 3,
+        "percentage": 42,
+        "nextResetTime": "2026-09-23T18:00:00Z"
+      },
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 6,
+        "percentage": 15,
+        "nextResetTime": "2026-09-28T00:00:00Z"
+      },
+      {
+        "type": "TIME_LIMIT",
+        "unit": 5,
+        "percentage": 0,
+        "nextResetTime": "2026-10-23T00:00:00Z"
+      }
+    ]
+  }
+}

@@ -57,6 +57,7 @@ function showError(msg: string) {
 
 async function refresh() {
   if (loading.value) return; // debounce: ignore concurrent refresh requests
+  if (verifying.value) return; // R-16: Key 验证期间跳过自动刷新，避免并发交叉写入
   loading.value = true;
   error.value = '';
   try {
@@ -181,27 +182,27 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="h-screen w-full flex flex-col bg-white/80 backdrop-blur-lg text-gray-800">
-    <!-- Top Bar（可拖拽窗口，§1.1） -->
-    <header data-tauri-drag-region class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+  <div class="h-screen w-full flex flex-col bg-neutral-100 text-neutral-900">
+    <!-- Top Bar（可拖拽窗口，§1.1） · 深色高对比顶栏 -->
+    <header data-tauri-drag-region class="flex items-center justify-between px-4 py-3 bg-neutral-900">
       <div class="flex items-center gap-2">
-        <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+        <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow">
           <span class="text-white text-sm font-bold">K</span>
         </div>
-        <h1 class="text-lg font-semibold">KeyKeeper</h1>
+        <h1 class="text-lg font-bold text-white tracking-tight">KeyKeeper</h1>
       </div>
     </header>
 
-    <!-- Success/Error Messages -->
-    <div v-if="success" class="px-4 py-2 bg-green-100 text-green-700 text-sm">
+    <!-- Success/Error Messages · 实色高对比 -->
+    <div v-if="success" class="px-4 py-2 bg-green-600 text-white text-sm font-medium">
       {{ success }}
     </div>
-    <div v-if="error" class="px-4 py-2 bg-red-100 text-red-700 text-sm">
+    <div v-if="error" class="px-4 py-2 bg-red-600 text-white text-sm font-medium">
       {{ error }}
     </div>
 
     <!-- Add Platform Form -->
-    <div class="px-4 py-3 border-b border-gray-200">
+    <div class="px-4 py-3 bg-white border-b border-neutral-300">
       <AddProviderForm
         :key="formKey"
         :specs="specs"
@@ -210,6 +211,7 @@ onMounted(async () => {
         :disabled="verifying"
         @add-api="addApi"
         @save-manual="addManual"
+        @cancel-reconfigure="reconfigure = null"
       />
       <p v-if="verifying" class="mt-1 text-xs text-blue-500">
         {{ verifyMessage }}
@@ -221,7 +223,7 @@ onMounted(async () => {
       <div v-if="loading && platforms.length === 0" class="text-center text-gray-500 py-8">
         加载中...
       </div>
-      <div v-else-if="platforms.length === 0" class="text-center text-gray-400 py-8">
+      <div v-else-if="platforms.length === 0" class="text-center text-neutral-500 py-8 font-medium">
         还没有添加平台，请在上方添加
       </div>
       <template v-for="p in sortedPlatforms" :key="p.id">

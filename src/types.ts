@@ -15,6 +15,8 @@ export interface Entitlement {
   remaining: number | null;
   /** 备注 / 估算说明 */
   note: string | null;
+  /** R-5：已用百分比（0–100），存在时主文案为“已用 X%”，expires_at 为重置时刻 */
+  used_percent: number | null;
 }
 
 /** 一个平台的完整状态 */
