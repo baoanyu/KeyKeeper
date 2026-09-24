@@ -6,9 +6,6 @@ export default {
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto'],
       },
-      backdropBlur: {
-        xs: '2px',
-      },
     },
   },
   plugins: [],
