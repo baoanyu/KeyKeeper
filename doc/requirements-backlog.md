@@ -16,14 +16,15 @@
 
 以下关键陈述已被 2026-07-23 审计推翻，**实施前必须重新验证**：
 
-| 原陈述 | 审计后真实情况 |
-|:---|:---|
-| 火山方舟用 HMAC-SHA256 签名 | 鉴权/端点/数据模型全错。真实是多维度用量 + 套餐信息，需用户 DevTools 抓包 |
-| Qoder 无公开余额接口 | 认知可能有误，需 DevTools 验证 |
-| DeepSeek 解析 `data.balance` | 实际是 `balance_infos[].total_balance`，当前代码始终返回 0.00 元 |
-| `QuotaInfo` 单值 `total + remaining` 够用 | 无法表达多维度用量，需升级为 `Vec<QuotaMetric>` + `Subscription` |
+| 原陈述 | 审计后真实情况 | 现行状态（2026-09-23） |
+|:---|:---|:---|
+| 火山方舟用 HMAC-SHA256 签名 | 鉴权/端点/数据模型全错。真实是多维度用量 + 套餐信息，需用户 DevTools 抓包 | ✅ 已按官方签名 Demo 重写 V4 签名器 + `QueryBalanceAcct`；billing region 待真实 AK/SK 终验 |
+| Qoder 无公开余额接口 | 认知可能有误，需 DevTools 验证 | ⬜ 未验证，Qoder 维持 `Manual` |
+| DeepSeek 解析 `data.balance` | 实际是 `balance_infos[].total_balance`，当前代码始终返回 0.00 元 | ✅ 已按官方文档改为解析**顶层** `balance_infos[]` |
+| `QuotaInfo` 单值 `total + remaining` 够用 | 无法表达多维度用量，需升级为 `Vec<QuotaMetric>` + `Subscription` | ✅ 已升级为 `Vec<Entitlement>`（**未采用**本表原本设想的 `QuotaMetric` / `Subscription` 三类型方案，见 refactor-plan-v2.md §2.2 及其 v4 修订） |
 
 > **铁律**：任何标注 ⚠️ 的字段路径、端点 URL、签名细节，实施前必须先 curl 真实响应或查规范。
+> 📌 **该铁律尚未完全满足**：三条自动查询的契约来自官方文档 / 实证实现 / 官方签名 Demo，**均未经真实 Key 终验**（终验清单见 [code-review-2026-09-remediation.md](./code-review-2026-09-remediation.md) §5）。
 
 ---
 
@@ -59,7 +60,9 @@
 
 ### P0-2. DeepSeek 余额解析字段错误 — 始终返回 0.00 元
 
-**位置**：`src-tauri/src/adapters/deepseek.rs:35-40`
+> ✅ **已修复**（2026-09-23，提交 `04f611b`）：改为按官方文档解析顶层 `balance_infos[]`，fixture 驱动的解析测试入库。**真实 Key 终验仍待做**。以下保留原始描述作证据链。
+
+**位置**：`src-tauri/src/adapters/deepseek.rs`（原 35-40 行）
 
 **现状**：代码读 `json["data"]["balance"]`，实际 DeepSeek `/user/balance` 返回 `balance_infos[].total_balance`。
 
@@ -70,6 +73,9 @@
 ---
 
 ### P0-3. Volcano 认知与实现全面错误（重大修正）
+
+> 🟡 **部分修复**（2026-09-23，提交 `04f611b`）：签名器已按官方 Demo 重写（`VOLC` 前缀 / region / URI / Action 四处错误已修），并实现 `QueryBalanceAcct` 账户余额接口；**billing region 待真实 AK/SK 终验**，方舟**套餐到期**预计无 API Key 可鉴权接口 → 维持 `Manual` 兜底（code-review §5 Q3/Q4）。
+> ⚠️ 下文「修复行动 2」的 `QuotaMetric` / `Subscription` / `QuotaStatus` 三类型方案**最终未被采纳**——实际落地为 `Entitlement` 加 `used_percent` 一个字段（理由见 refactor-plan-v2.md §2.2 v2.1 说明）。以下保留原始描述作证据链。
 
 > ⚠️ 初审最严重的认知错误。Volcano **有完整的官方套餐/用量查询 API**，且是用户工作流核心依赖。
 
@@ -283,6 +289,8 @@ pub struct PlatformSpec {
 
 ## 5. 📝 文档更新（未实施）
 
+> ✅ **已由后续工作取代**（2026-09-23）：`KeyKeeper.md` 已不存在（本文件即其合并产物），面向读者的正文由 `README.md` 承接并在提交 `3a963ec` / `04f611b` 重写；"数据结构 v2 多维度" 由 refactor-plan-v2.md §2.2 定案；火山签名的错误前提已按官方 Demo 修正。以下保留原始描述作证据链。
+
 ### KeyKeeper.md 正文重写
 
 文档顶部已加审计警示，但正文仍是错误版本。**依赖 Sprint 0 抓包完成**后有权威事实可写。
@@ -301,7 +309,7 @@ pub struct PlatformSpec {
 
 | # | 项 | 依赖 | 工作量 |
 |:---|:---|:---|:---|
-| R-1 | 菜单栏图标做状态指示（动态切换托盘图标：正常/余额低/请求失败） | P0-6 | 半天 |
+| ~~R-1~~ | ~~菜单栏图标做状态指示（动态切换托盘图标：正常/余额低/请求失败）~~ **已作废**：依赖 P0-6，而菜单栏形态已改为独立窗口（refactor-plan-v2.md §1.1 / §7），托盘不复存在；状态指示改由应用内标记承担（§2.7） | ~~P0-6~~ | — |
 | R-2 | 缓存上次成功结果 + "上次更新时间" | — | 半天 |
 | R-3 | 平台扩展（Kimi / SiliconFlow / OpenRouter / DashScope） | P2-8 后改动集中到 1 文件 | 2h/平台 |
 

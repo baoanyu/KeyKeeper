@@ -1,6 +1,6 @@
 # KeyKeeper v2 改造计划
 
-> 制定时间：2026-09 · 状态：**执行中**（2026-09-23：Phase 0 / 1 / 2 已完成并提交；Phase 4 收尾中；Phase 3 待用户提供真实响应样本）
+> 制定时间：2026-09 · 状态：**基本完成**（2026-09-23：Phase 0 / 1 / 2 / 4 已完成并提交；Phase 3 已按官方文档 / 实证契约落地三条自动查询，**唯一剩余阻塞是批次 C「真实 Key 终验」**——见 [code-review-2026-09-remediation.md](./code-review-2026-09-remediation.md) §5）
 > 本文档整合三件事：① 产品形态改造 ② 本次全量代码审查发现的问题 ③ 平台扩展。
 > 相关文档：[requirements-backlog.md](./requirements-backlog.md)（历史 backlog，本文档实施后会吸收其中多项）
 
@@ -11,6 +11,7 @@
 | v1 | 初稿 |
 | v2 | 对抗性审查后修订：<br>· **F-1** §3.1「30 天」结论降级（证据不足，存在幸存者偏差）<br>· **F-2** 修正 §3.2 与 Phase 2 关于 Volcano 的自相矛盾<br>· **F-3** 新增 §1.4「后台行为」——原缺失，且阻塞形态改造<br>· **F-4** 超算 / 豆包工作标注为待确认，修正 §6 的「已解决」误述<br>· **F-5** 数据模型精简：5 个类型 → 2 个<br>· **F-6** Phase 重排：核心价值优先于外壳改造<br>· **F-7~F-14** 补工作量估算、编辑交互、到期语义、Phase 2 预案等 |
 | v3 | 用户决策落地：<br>· **§1.4 定案「关窗退出」** → **系统通知整体移除**，改为应用内到期标记（§2.7）<br>· **P1-3 改为「改造消解」** —— 通知删除后节流问题不存在<br>· **§3.2 更正**：「超算 DeepSeek」是独立产品，**不是** scnet.cn（我此前的归类是错的）<br>· 「豆包工作」按用户指示采用推荐值（仍未验证）<br>· 新增 §1.4 备选：「黄灯最小化时继续提醒」待确认，默认不实现 |
+| v4 | 全量代码评审后同步（提交 `3a963ec` / `04f611b`）：<br>· **§2.2 模型 v2.1**：`Entitlement` 增加 `used_percent`（配额窗口型平台），补回 §2.5 展示规则<br>· **§2.5 新增「已用 X%」卡片形态**（智谱 / 方舟类配额窗口接口）<br>· **§5 Phase 3 落地方式变更**：不再依赖用户抓包，改由官方文档（DeepSeek）/ 实证实现（智谱）/ 官方签名 Demo（火山）驱动，fixture 已入库<br>· **§5 Phase 4 完成**；**§6 待确认项收敛**（原 Q2/Q4 部分解决）<br>· 新增评审文档 [code-review-2026-09-remediation.md](./code-review-2026-09-remediation.md) 为问题清单与终验清单的权威来源 |
 
 ---
 
@@ -148,13 +149,23 @@ pub enum Source {
 /// 一个额度包（对应图里的一行记录）
 pub struct Entitlement {
     pub label: String,             // "0.1" / "10M 体验" / "余额"
-    pub expires_at: Option<i64>,   // 到期时间戳
+    pub expires_at: Option<i64>,   // 到期时间戳；used_percent 存在时语义为「重置时刻」
     pub unit: QuotaUnit,
     pub total: Option<f64>,        // 有 total 才画进度条
     pub remaining: Option<f64>,
     pub note: Option<String>,      // 估算说明 / 错误信息 / 备注，一个字段覆盖
+    // ↓ v2.1 追加（见下方说明）
+    pub used_percent: Option<f64>, // 已用百分比 0–100
 }
+```
 
+> **v2.1 追加 `used_percent` 的理由**（2026-09-23，代码评审 R-5）：
+> 智谱 `monitor/usage/quota/limit` 与火山方舟类接口返回的是**配额窗口**（「已用 42%，X 时刻重置」），
+> **没有** `total` / `remaining` 绝对值 —— 强行套 `total/remaining` 只能伪造数字。
+> 故按真实契约加一个字段：`used_percent.is_some()` 时卡片主文案为「已用 X%」，`expires_at` 解释为重置时刻。
+> v1 精简时砍掉的 `QuotaMetric.used`（理由是 `used = total - remaining` 可推导）在**没有 total 的平台不成立**，此处是按新证据的修正，不是回退。
+
+```rust
 pub struct PlatformStatus {
     pub id: String,                // 稳定标识 "deepseek"
     pub display_name: String,      // "DeepSeek"
@@ -170,8 +181,8 @@ pub struct PlatformStatus {
 | 字段 | 砍掉的理由 |
 |:---|:---|
 | `Trust` 枚举 | 与 `Source` 语义重叠（`Trust::Manual` ≡ `Source::Manual`）；`Failed` 用 `note.is_some()` 表达 |
-| `QuotaMetric.resets_at` | 只服务于 Qoder 的 5 小时窗口，而 Qoder 已降级为 `Manual` → **当前零用户** |
-| `QuotaMetric.used` | `used = total - remaining`，可推导，§2.4 展示也用不到 |
+| `QuotaMetric.resets_at` | 只服务于 Qoder 的 5 小时窗口，而 Qoder 已降级为 `Manual` → **当前零用户**（配额窗口型平台的重置时刻复用 `expires_at`，见 v2.1 说明） |
+| ~~`QuotaMetric.used`~~ | ~~`used = total - remaining`，可推导~~ —— **v2.1 部分推翻**：该推导在无 `total` 的配额窗口平台上不成立，故以 `used_percent` 形式恢复 |
 | `PlatformStatus.message` | 合并进 `Entitlement.note` |
 
 > 恢复条件：若 Qoder 未来确认真实接口并走自动查询，再引入 `resets_at`。
@@ -199,6 +210,7 @@ pub struct PlatformStatus {
 | 有 `expires_at` | **还剩 N 天** | 到期日 + 额度包名 |
 | 只有 `remaining` | **¥X / N tokens** | 进度条（`total` 已知时） |
 | 两者都有 | 还剩 N 天 | 余额 + 进度条 |
+| **有 `used_percent`** | **已用 X%** | 重置时刻（即 `expires_at`）+ 进度条 |
 | `source = Manual` | 同上 | 加"手动"标记 + **编辑入口** |
 
 ### 2.6 手动录入的交互（新增 · 原为空白）
@@ -222,6 +234,8 @@ pub struct PlatformStatus {
 | 到期 ≤ 3 天 | 🔴 置顶 + 红色 |
 | 到期 ≤ 7 天 | 🟡 橙色 |
 | 余额 < 单位阈值 | 🟠 橙色 |
+| `used_percent` ≥ 95 | 🔴 进度条红色 |
+| `used_percent` ≥ 80 | 🟠 进度条橙色 |
 
 **不需要节流** —— 应用内标记是**状态**而非**事件**，用户打开就看到，不存在"重复打扰"。原 P1-3 的节流问题随之消失（见 §4）。
 
@@ -403,26 +417,34 @@ pub struct PlatformSpec {
 
 ### Phase 3 —— API 适配器（依赖你提供真实响应 · 估时不确定）
 
-| # | 任务 | 验证标准 |
-|:---|:---|:---|
-| 3.1 | **你提供真实响应样本** → 存 `src-tauri/tests/fixtures/` | 每平台一份脱敏 JSON |
-| 3.2 | 火山方舟余额接口抓包定位 | 拿到真实端点 + 鉴权方式 |
-| 3.3 | 按真实字段重写解析（strong-typed struct，吸收 backlog P2-7） | fixture 驱动的解析测试通过 |
-| 3.4 | 验证 MiMo / LongCat / 超算 能否用 API Key 访问 | 可访问 → 升级为 `Api`；仅登录态 → 保持 `Manual` |
+> ✅ **已落地（2026-09-23，提交 `04f611b`）——但换了一条路径**：
+> 原计划依赖用户抓包提供真实响应；实际改为**官方文档 / 实证实现 / 官方签名 Demo 驱动**，
+> 三个适配器（DeepSeek / 智谱 / 火山）已按各自契约重写，fixture 与 13 个新单测入库。
+> **尚欠的只有真实 Key 终验**（批次 C，见 code-review §5）——契约来自文档而非实测，仍存在"文档与线上不一致"的残余风险。
+
+| # | 任务 | 验证标准 | 状态 |
+|:---|:---|:---|:---|
+| 3.1 | ~~你提供真实响应样本~~ → 存 `src-tauri/tests/fixtures/` | 每平台一份脱敏 JSON | 🟡 三份 fixture 已入库，但来源是官方文档示例 / 实证实现，**非真实 Key 响应** |
+| 3.2 | 火山方舟余额接口抓包定位 | 拿到真实端点 + 鉴权方式 | ✅ 官方签名 Demo 定位到 `QueryBalanceAcct` + V4 签名（原 HMAC 四处错误已修）；🟡 billing region 待终验 |
+| 3.3 | 按真实字段重写解析（strong-typed struct，吸收 backlog P2-7） | fixture 驱动的解析测试通过 | ✅ 三个适配器均已重写 |
+| 3.4 | 验证 MiMo / LongCat / 超算 能否用 API Key 访问 | 可访问 → 升级为 `Api`；仅登录态 → 保持 `Manual` | ⬜ 未做，维持 `Manual` |
 
 > ⚠️ **本阶段预期产出可能是负结果。**
 > 按 §3.2，除火山外其余平台的余额查询都疑似登录态。若验证下来全部接不上，**Phase 3 的结论就是"确认不可行"，`Manual` 模式兜底 —— 这不是失败**，而是把不确定性消除了。
 > 严格遵循铁律：任何字段路径、端点 URL、签名细节，**实施前必须先拿到真实响应**。Volcano 的 HMAC 签名就是整个前提错误的教训。
+> 📌 **该铁律在当前状态下仍未被完全满足**：契约已从"猜测"升级为"有文档/实证支撑"，但**未经真实 Key 终验**。
 
 ### Phase 4 —— 收尾（约 0.5 天）
 
-| # | 任务 | 验证标准 |
-|:---|:---|:---|
-| 4.1 | 接通 opener（P1-1） | 点"充值/控制台"能打开系统浏览器（`window.open` 必须改 `openUrl`） |
-| 4.2 | 表单保留 Key（P1-2） | 验证失败后 Key 仍在输入框 |
-| 4.3 | 重置 `reconfigureProvider`（P1-4） | 同一平台可重复触发"重新配置" |
-| 4.4 | 补 CSP（P2-6） | 应用正常渲染，无 CSP 报错 |
-| 4.5 | README 重写（P2-4） | 与实现一致 |
+> ✅ **已完成**（提交 `3a963ec`；4.2 / 4.3 已在 Phase 1 提前完成，4.1 的 AddProviderForm 死链由 `04f611b` 补齐）
+
+| # | 任务 | 验证标准 | 状态 |
+|:---|:---|:---|:---|
+| 4.1 | 接通 opener（P1-1） | 点"充值/控制台"能打开系统浏览器（`window.open` 必须改 `openUrl`） | ✅ |
+| 4.2 | 表单保留 Key（P1-2） | 验证失败后 Key 仍在输入框 | ✅ |
+| 4.3 | 重置 `reconfigureProvider`（P1-4） | 同一平台可重复触发"重新配置" | ✅ |
+| 4.4 | 补 CSP（P2-6） | 应用正常渲染，无 CSP 报错 | ✅ |
+| 4.5 | README 重写（P2-4） | 与实现一致 | ✅ |
 
 **总估时**：约 4 个工作日（不含 Phase 3，其估时取决于响应验证结果）。
 
@@ -430,17 +452,18 @@ pub struct PlatformSpec {
 
 ## 6. 待确认问题
 
-> v1 曾声称"调研已解决前三项"——**该声明不准确**。v3 已由用户澄清：「超算 DeepSeek」是独立产品（非 scnet.cn）、「豆包工作」按推荐值采用、§1.4 后台行为已拍板。剩余如下。
+> v1 曾声称"调研已解决前三项"——**该声明不准确**。v3 已由用户澄清：「超算 DeepSeek」是独立产品（非 scnet.cn）、「豆包工作」按推荐值采用、§1.4 后台行为已拍板。
+> **v4 注**：下列条目中「待用户确认」的现行权威清单已移交 [code-review-2026-09-remediation.md](./code-review-2026-09-remediation.md) §5（Q1–Q6），表格保留原貌 + 当前状态。
 
-| # | 问题 | 类型 | 影响 |
-|:---|:---|:---|:---|
-| 1 | **是否保留「黄灯最小化时继续提醒」**（§1.4 备选） | 🟡 影响 Phase 2 | 默认**不实现**。想要就说一声 |
-| 2 | **火山方舟的余额/用量 API 端点** | 🟠 阻塞 Phase 3.2 | 你已确认有 API，需抓包或文档路径 |
-| 3 | **MiMo / LongCat 能否用 API Key 查余额** | 🟠 阻塞 Phase 3.4 | 需真实 Key 实测 |
-| 4 | **真实响应样本** | 🟠 阻塞 Phase 3 | 见 §6.1 |
-| 5 | **这些额度包的真实周期是多久**（§3.1 未决项） | 🟡 影响 §2.6 快捷按钮 | 决定「+30 天」是否合理 |
-| 6 | **超算 DeepSeek / 豆包工作的控制台 URL** | 🟡 影响充值按钮 | 留空不阻塞 Phase 1，可后补 |
-| 7 | **`CLAUDE.md` / `AGENTS.md` 是否纳入 git** | 🟡 无关紧要 | 目前被忽略 |
+| # | 问题 | 类型 | 影响 | 当前状态 |
+|:---|:---|:---|:---|:---|
+| 1 | **是否保留「黄灯最小化时继续提醒」**（§1.4 备选） | 🟡 影响 Phase 2 | 默认**不实现**。想要就说一声 | 仍开放 |
+| 2 | **火山方舟的余额/用量 API 端点** | 🟠 阻塞 Phase 3.2 | 你已确认有 API，需抓包或文档路径 | 🟡 **端点已由官方签名 Demo 定位**（`QueryBalanceAcct`）；仅 billing region 待终验（code-review Q3） |
+| 3 | **MiMo / LongCat 能否用 API Key 查余额** | 🟠 阻塞 Phase 3.4 | 需真实 Key 实测 | 仍开放（code-review Q5） |
+| 4 | **真实响应样本** | 🟠 阻塞 Phase 3 | 见 §6.1 | 🟡 三份 fixture 已入库，但来自官方文档/实证实现，**真实 Key 响应仍待补** |
+| 5 | **这些额度包的真实周期是多久**（§3.1 未决项） | 🟡 影响 §2.6 快捷按钮 | 决定「+30 天」是否合理 | 仍开放 |
+| 6 | **超算 DeepSeek / 豆包工作的控制台 URL** | 🟡 影响充值按钮 | 留空不阻塞 Phase 1，可后补 | 仍开放（code-review Q6） |
+| 7 | **`CLAUDE.md` / `AGENTS.md` 是否纳入 git** | 🟡 无关紧要 | 目前被忽略（`.gitignore` 显式排除） | 仍开放 |
 
 ### 6.1 响应样本的采集方式
 

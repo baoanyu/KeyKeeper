@@ -37,3 +37,4 @@ pnpm-debug.log*
 # 注意：/CLAUDE.md 与 /AGENTS.md 仍被忽略，是否纳管见 refactor-plan-v2.md §6
 /CLAUDE.md
 /AGENTS.md
+/doc/
