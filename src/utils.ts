@@ -100,3 +100,57 @@ export function sortPlatforms(list: PlatformStatus[]): PlatformStatus[] {
     return a.display_name.localeCompare(b.display_name, 'zh-CN');
   });
 }
+
+// ═══════════════════════════════════════════════════════════
+// 标记项/普通项分离（system_design.md §3.2）
+//
+// Manual 源 = 手动录入到期数据的标记项
+// Api 源 = 自动拉取额度的普通项
+// ═══════════════════════════════════════════════════════════
+
+/** 平台分组：标记项（Manual 源）与普通项（Api 源） */
+export interface PlatformGroup {
+  manual: PlatformStatus[];
+  api: PlatformStatus[];
+}
+
+/** 按 source 拆分平台列表，各自独立 urgency 排序（不跨组混排） */
+export function splitPlatforms(list: PlatformStatus[]): PlatformGroup {
+  return {
+    manual: sortPlatforms(list.filter((p) => p.source === 'manual')),
+    api: sortPlatforms(list.filter((p) => p.source === 'api')),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 错误处理（M-03）
+// ═══════════════════════════════════════════════════════════
+
+/** 从 unknown 错误值提取可读错误信息 */
+export function errMsg(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  return JSON.stringify(e);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 纯函数提取（Q-02）：QuotaCard 顶层逻辑移入 utils，便于单测
+// ═══════════════════════════════════════════════════════════
+
+/** 检测平台错误信息中是否包含认证失败关键词（401/403/unauthorized/中文） */
+export function isAuthError(errorMsg: string | null | undefined): boolean {
+  const msg = errorMsg ?? '';
+  return /\b401\b/.test(msg)
+    || /\b403\b/.test(msg)
+    || /unauthorized|invalid.*key|key.*invalid|认证|凭证|鉴权/i.test(msg);
+}
+
+/** 判断平台是否为手动录入模式 */
+export function isManualPlatform(p: PlatformStatus): boolean {
+  return p.source === 'manual';
+}
+
+/** 判断平台是否有低额度额度包 */
+export function anyLowBalance(p: PlatformStatus): boolean {
+  return p.entitlements.some(isLowBalance);
+}

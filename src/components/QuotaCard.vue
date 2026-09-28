@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Entitlement, PlatformStatus, QuotaUnit } from '../types';
-import { daysLeft, entitlementBadge, formatDate, isLowBalance } from '../utils';
+import { daysLeft, entitlementBadge, formatDate, isLowBalance, isAuthError, isManualPlatform, anyLowBalance } from '../utils';
 
 const props = defineProps<{ platform: PlatformStatus }>();
 const emit = defineEmits<{
-  delete: [];
+  delete: [p: PlatformStatus];
   retry: [];
   reconfigure: [id: string];
   edit: [id: string];
@@ -104,33 +104,26 @@ const badgeClass = (e: Entitlement) => {
 
 const lowTag = (e: Entitlement) => !e.expires_at && isLowBalance(e);
 
-// U-20: detect auth failures (401/403) to surface recovery actions
-const isAuthError = () => {
-  const msg = props.platform.error ?? '';
-  return /\b401\b/.test(msg)
-    || /\b403\b/.test(msg)
-    || /unauthorized|invalid.*key|key.*invalid|认证|凭证|鉴权/i.test(msg);
-};
-
-const isManual = () => props.platform.source === 'manual';
-
 // P1-1: window.open 在 Tauri webview 中静默无效，必须走 opener 插件
 const openConsole = () => {
   if (props.platform.console_url) {
     openUrl(props.platform.console_url);
   }
 };
-
-const anyLow = () => props.platform.entitlements.some(isLowBalance);
 </script>
 
 <template>
-  <div class="bg-white rounded-xl border border-neutral-300 p-3 shadow-md">
+  <div
+    class="bg-white rounded-xl border p-3 shadow-md"
+    :class="isManualPlatform(platform) ? 'border-amber-200' : 'border-neutral-300'"
+  >
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-2">
+        <span v-if="isManualPlatform(platform)" class="text-amber-600 text-xs" title="手动标记">📌</span>
+        <span v-else class="text-blue-500 text-xs" title="API 平台">🔄</span>
         <span class="font-semibold text-sm text-neutral-900">{{ platform.display_name }}</span>
         <span
-          v-if="isManual()"
+          v-if="isManualPlatform(platform)"
           class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-medium"
         >
           手动
@@ -138,24 +131,24 @@ const anyLow = () => props.platform.entitlements.some(isLowBalance);
       </div>
       <div class="flex items-center gap-1">
         <button
-          v-if="!isManual()"
+          v-if="!isManualPlatform(platform)"
           @click="emit('retry')"
-          class="text-gray-400 hover:text-blue-500 text-sm"
+          class="text-gray-400 hover:text-blue-500 text-sm active:scale-95 transition-transform"
           title="刷新"
         >
           ↻
         </button>
         <button
-          v-if="isManual()"
+          v-if="isManualPlatform(platform)"
           @click="emit('edit', platform.id)"
-          class="text-gray-400 hover:text-blue-500 text-sm"
+          class="text-gray-400 hover:text-blue-500 text-sm active:scale-95 transition-transform"
           title="编辑"
         >
           ✎
         </button>
         <button
-          @click="emit('delete')"
-          class="text-gray-400 hover:text-red-500 text-sm"
+          @click="emit('delete', platform)"
+          class="text-gray-400 hover:text-red-500 text-sm active:scale-95 transition-transform"
           title="删除"
         >
           ✕
@@ -168,7 +161,7 @@ const anyLow = () => props.platform.entitlements.some(isLowBalance);
       <p class="text-red-600 text-xs font-medium">{{ platform.error }}</p>
       <div class="flex flex-wrap gap-2">
         <button
-          v-if="isAuthError()"
+          v-if="isAuthError(platform.error)"
           @click="emit('reconfigure', platform.id)"
           class="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium"
         >
@@ -203,9 +196,9 @@ const anyLow = () => props.platform.entitlements.some(isLowBalance);
       </div>
 
       <button
-        v-if="anyLow() && platform.console_url"
+        v-if="anyLowBalance(platform) && platform.console_url"
         @click="openConsole"
-        class="mt-1 w-full text-xs py-1.5 bg-orange-600 text-white rounded hover:bg-orange-700 transition font-medium"
+        class="mt-1 w-full text-xs py-1.5 bg-orange-600 text-white rounded hover:bg-orange-700 transition font-medium active:scale-95"
       >
         立即充值
       </button>

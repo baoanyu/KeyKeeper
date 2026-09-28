@@ -10,3 +10,42 @@ html, body {
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   过渡动画（system_design.md §1.1 D6 / Q7）
+   list-* → PlatformSection 内 TransitionGroup name="list"
+   fade-* → App.vue 消息条 Transition name="fade"
+   ═══════════════════════════════════════════════════════════ */
+
+/* TransitionGroup 列表过渡：进入上方滑入，离开右移淡出 */
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.2s ease;
+}
+.list-enter-from {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(16px);
+}
+/* 离开元素脱离布局流，剩余卡片才能触发 move 过渡平滑上移；
+   width:100% 防止绝对定位后卡片宽度塌缩 */
+.list-leave-active {
+  position: absolute;
+  width: 100%;
+}
+.list-move {
+  transition: transform 0.2s ease;
+}
+
+/* 消息条淡入淡出 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}

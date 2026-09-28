@@ -21,9 +21,8 @@ Thumbs.db
 # 工具残留
 .mimosa/
 
-# Env
-.env
-.env.local
+# WorkBuddy IDE 内部数据
+.workbuddy/
 
 # Logs
 *.log
@@ -37,5 +36,8 @@ pnpm-debug.log*
 # 注意：/CLAUDE.md 与 /AGENTS.md 仍被忽略，是否纳管见 refactor-plan-v2.md §6
 /CLAUDE.md
 /AGENTS.md
-/doc/
-/doc/
+# doc/ 白名单：*.md 和 *.mermaid 文档纳入版本控制，忽略其他临时文件
+/doc/*
+!doc/*.md
+!doc/*.mermaid
+!doc/.*

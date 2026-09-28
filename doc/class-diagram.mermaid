@@ -1,0 +1,152 @@
+classDiagram
+    direction TB
+
+    class Entitlement {
+        +string label
+        +number|null expires_at
+        +QuotaUnit unit
+        +number|null total
+        +number|null remaining
+        +string|null note
+        +number|null used_percent
+    }
+
+    class PlatformStatus {
+        +string id
+        +string display_name
+        +Source source
+        +Entitlement[] entitlements
+        +string|null console_url
+        +string|null error
+        +number updated_at
+    }
+
+    class PlatformSpec {
+        +string id
+        +string display_name
+        +PlatformMode mode
+        +string console_url
+        +string key_docs_url
+        +string key_hint
+        +string key_pattern
+    }
+
+    class Source {
+        <<enumeration>>
+        api
+        manual
+    }
+
+    class QuotaUnit {
+        <<enumeration>>
+        cny
+        tokens
+        seconds
+        unknown
+    }
+
+    PlatformStatus "1" --> "0..*" Entitlement : entitlements
+    PlatformStatus --> Source : source
+    Entitlement --> QuotaUnit : unit
+
+    class AppViewModel {
+        -Ref~PlatformSpec[]~ specs
+        -Ref~PlatformStatus[]~ platforms
+        -Ref~boolean~ loading
+        -Ref~boolean~ verifying
+        -Ref~string~ lastUpdated
+        -Ref~string~ error
+        -Ref~string~ success
+        -Ref~{id:string,n:number}|null~ reconfigure
+        -Ref~string|null~ editingId
+        -Ref~Entitlement[]~ editInitial
+        -Computed~PlatformStatus[]~ sortedPlatforms
+        -Computed~PlatformStatus[]~ manualPlatforms
+        -Computed~PlatformStatus[]~ apiPlatforms
+        -Computed~string[]~ configuredIds
+        +refresh() void
+        +addApi(id, key) void
+        +addManual(id, entitlements) void
+        +startEdit(id) void
+        +saveEdit(id, entitlements) void
+        +deletePlatform(p) void
+        +startReconfigure(id) void
+    }
+
+    AppViewModel --> PlatformStatus : manages
+    AppViewModel --> PlatformSpec : reads
+
+    class Utils {
+        +dateInputToTimestamp(str) number
+        +timestampToDateInput(ts) string
+        +daysLeft(expiresAt) number
+        +formatDate(ts) string
+        +dateInputInDays(n) string
+        +entitlementBadge(e) Badge
+        +isLowBalance(e) boolean
+        +platformUrgency(p) number
+        +sortPlatforms(list) PlatformStatus[]
+        +splitPlatforms(list) PlatformGroup
+    }
+
+    class PlatformGroup {
+        +PlatformStatus[] manual
+        +PlatformStatus[] api
+    }
+
+    Utils --> PlatformStatus : sorts
+    Utils --> PlatformGroup : splits
+
+    class QuotaCard {
+        +PlatformStatus platform
+        +emit delete
+        +emit retry
+        +emit reconfigure
+        +emit edit
+        +isManual() boolean
+        +isAuthError() boolean
+    }
+
+    class PlatformSection {
+        +string title
+        +PlatformStatus[] platforms
+        +boolean loading
+        +string emptyText
+        +emit delete
+        +emit retry
+        +emit reconfigure
+        +emit edit
+    }
+
+    class SkeletonCard {
+        <<pure visual>>
+    }
+
+    class AddProviderForm {
+        +PlatformSpec[] specs
+        +string[] configuredIds
+        +{id,n}|null preselected
+        +boolean disabled
+        +emit addApi
+        +emit saveManual
+        +emit cancelReconfigure
+    }
+
+    class ManualEntryForm {
+        +Entitlement[] initial
+        +emit save
+        +emit cancel
+    }
+
+    class RefreshBar {
+        +string lastUpdated
+        +boolean loading
+        +emit refresh
+    }
+
+    AppViewModel --> QuotaCard : renders
+    AppViewModel --> PlatformSection : renders
+    AppViewModel --> AddProviderForm : renders
+    AppViewModel --> RefreshBar : renders
+    PlatformSection --> QuotaCard : contains
+    PlatformSection --> SkeletonCard : loading state

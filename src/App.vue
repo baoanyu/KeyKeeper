@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import QuotaCard from './components/QuotaCard.vue';
+import PlatformSection from './components/PlatformSection.vue';
 import AddProviderForm from './components/AddProviderForm.vue';
 import ManualEntryForm from './components/ManualEntryForm.vue';
 import RefreshBar from './components/RefreshBar.vue';
 import type { Entitlement, PlatformSpec, PlatformStatus } from './types';
-import { sortPlatforms } from './utils';
+import { splitPlatforms, errMsg } from './utils';
 
 const specs = ref<PlatformSpec[]>([]);
 const platforms = ref<PlatformStatus[]>([]);
@@ -31,7 +31,10 @@ const editInitial = ref<Entitlement[]>([]);
 // 验证成功后递增，强制重建添加表单以清空状态
 const formKey = ref(0);
 
-const sortedPlatforms = computed(() => sortPlatforms(platforms.value));
+// 标记项/普通项分离（system_design.md §1.1 D1）：组内独立 urgency 排序，不跨组混排
+const groupedPlatforms = computed(() => splitPlatforms(platforms.value));
+const manualPlatforms = computed(() => groupedPlatforms.value.manual);
+const apiPlatforms = computed(() => groupedPlatforms.value.api);
 const configuredIds = computed(() => platforms.value.map((p) => p.id));
 
 let successTimer: number | null = null;
@@ -55,16 +58,20 @@ function showError(msg: string) {
   }, 5000);
 }
 
-async function refresh() {
+async function refresh(skipUnchanged = false) {
   if (loading.value) return; // debounce: ignore concurrent refresh requests
   if (verifying.value) return; // R-16: Key 验证期间跳过自动刷新，避免并发交叉写入
   loading.value = true;
   error.value = '';
   try {
-    platforms.value = await invoke<PlatformStatus[]>('get_all_platforms');
+    const newPlatforms = await invoke<PlatformStatus[]>('get_all_platforms');
+    // P-03: skipUnchanged 时仅在数据变化时赋值，消除 TransitionGroup 无意义 move 动画
+    if (!skipUnchanged || platformsHaveChanged(platforms.value, newPlatforms)) {
+      platforms.value = newPlatforms;
+    }
     lastUpdated.value = new Date().toLocaleTimeString();
   } catch (e) {
-    showError(String(e));
+    showError(errMsg(e));
   } finally {
     loading.value = false;
   }
@@ -109,7 +116,7 @@ async function addApi(id: string, key: string) {
     } else {
       try { await invoke('delete_platform', { id }); } catch { /* 恢复失败不掩盖原始错误 */ }
     }
-    showError(`Key 验证失败：${String(e)}`);
+    showError(`Key 验证失败：${errMsg(e)}`);
   } finally {
     verifying.value = false;
     verifyMessage.value = '';
@@ -124,7 +131,7 @@ async function addManual(id: string, entitlements: Entitlement[]) {
     await refresh();
     showSuccess('已保存到期记录');
   } catch (e) {
-    showError(`保存失败: ${String(e)}`);
+    showError(`保存失败: ${errMsg(e)}`);
   }
 }
 
@@ -135,7 +142,7 @@ async function startEdit(id: string) {
     editingId.value = id;
     reconfigure.value = null;
   } catch (e) {
-    showError(`加载数据失败: ${String(e)}`);
+    showError(`加载数据失败: ${errMsg(e)}`);
   }
 }
 
@@ -146,7 +153,7 @@ async function saveEdit(id: string, entitlements: Entitlement[]) {
     await refresh();
     showSuccess('已更新到期记录');
   } catch (e) {
-    showError(`保存失败: ${String(e)}`);
+    showError(`保存失败: ${errMsg(e)}`);
   }
 }
 
@@ -157,7 +164,7 @@ async function deletePlatform(p: PlatformStatus) {
     await refresh();
     showSuccess(`已删除 ${p.display_name}`);
   } catch (e) {
-    showError(`删除失败: ${String(e)}`);
+    showError(`删除失败: ${errMsg(e)}`);
   }
 }
 
@@ -167,17 +174,44 @@ function startReconfigure(id: string) {
   editingId.value = null;
 }
 
-onMounted(async () => {
-  try {
-    specs.value = await invoke<PlatformSpec[]>('get_platform_specs');
-  } catch (e) {
-    showError(String(e));
+// P-03: 比对平台列表是否有实质变化（updated_at / entitlements 内容）
+function platformsHaveChanged(oldList: PlatformStatus[], newList: PlatformStatus[]): boolean {
+  if (oldList.length !== newList.length) return true;
+  const oldMap = new Map(oldList.map(p => [p.id, p]));
+  for (const newP of newList) {
+    const oldP = oldMap.get(newP.id);
+    if (!oldP) return true;
+    if (oldP.updated_at !== newP.updated_at) return true;
+    if (oldP.error !== newP.error) return true;
+    if (oldP.entitlements.length !== newP.entitlements.length) return true;
   }
-  await refresh();
+  return false;
+}
 
-  await listen('auto-refresh', () => {
-    refresh();
+let unlistenAutoRefresh: (() => void) | undefined;
+
+onMounted(async () => {
+  // P-01: specs 与 platforms 并行加载（无数据依赖）
+  const [specsResult] = await Promise.all([
+    invoke<PlatformSpec[]>('get_platform_specs').catch((e) => {
+      showError(errMsg(e));
+      return [] as PlatformSpec[];
+    }),
+    refresh(),
+  ]);
+  specs.value = specsResult;
+
+  // P-04: 保存 UnlistenFn 以便后续清理
+  unlistenAutoRefresh = await listen('auto-refresh', () => {
+    refresh(true); // auto-refresh 使用 skipUnchanged 短路
   });
+});
+
+// P-04: 清理事件监听器与消息计时器
+onBeforeUnmount(() => {
+  unlistenAutoRefresh?.();
+  if (successTimer !== null) clearTimeout(successTimer);
+  if (errorTimer !== null) clearTimeout(errorTimer);
 });
 </script>
 
@@ -193,13 +227,17 @@ onMounted(async () => {
       </div>
     </header>
 
-    <!-- Success/Error Messages · 实色高对比 -->
-    <div v-if="success" class="px-4 py-2 bg-green-600 text-white text-sm font-medium">
-      {{ success }}
-    </div>
-    <div v-if="error" class="px-4 py-2 bg-red-600 text-white text-sm font-medium">
-      {{ error }}
-    </div>
+    <!-- Success/Error Messages · 实色高对比 + 淡入淡出 -->
+    <Transition name="fade">
+      <div v-if="success" class="px-4 py-2 bg-green-600 text-white text-sm font-medium">
+        {{ success }}
+      </div>
+    </Transition>
+    <Transition name="fade">
+      <div v-if="error" class="px-4 py-2 bg-red-600 text-white text-sm font-medium">
+        {{ error }}
+      </div>
+    </Transition>
 
     <!-- Add Platform Form -->
     <div class="px-4 py-3 bg-white border-b border-neutral-300">
@@ -218,32 +256,54 @@ onMounted(async () => {
       </p>
     </div>
 
-    <!-- Platform List -->
-    <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-      <div v-if="loading && platforms.length === 0" class="text-center text-gray-500 py-8">
-        加载中...
-      </div>
-      <div v-else-if="platforms.length === 0" class="text-center text-neutral-500 py-8 font-medium">
-        还没有添加平台，请在上方添加
-      </div>
-      <template v-for="p in sortedPlatforms" :key="p.id">
-        <QuotaCard
-          :platform="p"
-          @delete="deletePlatform(p)"
-          @retry="refresh"
-          @reconfigure="startReconfigure"
-          @edit="startEdit"
-        />
+    <!-- Platform List：标记项（Manual 源）与普通项（Api 源）分区渲染 -->
+    <div class="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+      <!-- 标记项区块：手动录入到期数据的平台 -->
+      <PlatformSection
+        v-if="manualPlatforms.length > 0 || loading"
+        title="手动标记"
+        :platforms="manualPlatforms"
+        :loading="loading && platforms.length === 0"
+        empty-text="暂无手动标记的平台"
+        @delete="deletePlatform"
+        @retry="refresh"
+        @reconfigure="startReconfigure"
+        @edit="startEdit"
+      >
         <!-- 手动录入就地展开编辑表单（§2.6） -->
-        <div v-if="editingId === p.id" class="bg-blue-50/60 border border-blue-200 rounded-lg p-3">
-          <p class="text-xs text-blue-700 mb-2">编辑 {{ p.display_name }} 的到期记录</p>
-          <ManualEntryForm
-            :initial="editInitial"
-            @save="saveEdit(p.id, $event)"
-            @cancel="editingId = null"
-          />
+        <template #below-card="{ platform }">
+          <div v-if="editingId === platform.id" class="bg-amber-50/60 border border-amber-200 rounded-lg p-3">
+            <p class="text-xs text-amber-700 mb-2">编辑 {{ platform.display_name }} 的到期记录</p>
+            <ManualEntryForm
+              :initial="editInitial"
+              @save="saveEdit(platform.id, $event)"
+              @cancel="editingId = null"
+            />
+          </div>
+        </template>
+      </PlatformSection>
+
+      <!-- 普通项区块：自动拉取额度的平台 -->
+      <PlatformSection
+        v-if="apiPlatforms.length > 0 || loading"
+        title="API 平台"
+        :platforms="apiPlatforms"
+        :loading="loading && platforms.length === 0"
+        empty-text="暂无 API 平台"
+        @delete="deletePlatform"
+        @retry="refresh"
+        @reconfigure="startReconfigure"
+        @edit="startEdit"
+      />
+
+      <!-- 全局空状态 -->
+      <div v-if="!loading && platforms.length === 0" class="text-center py-12">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-neutral-200 mb-4">
+          <span class="text-2xl">🔑</span>
         </div>
-      </template>
+        <p class="text-neutral-600 font-medium">还没有添加平台</p>
+        <p class="text-neutral-400 text-sm mt-1">点击上方「添加平台」开始管理你的额度</p>
+      </div>
     </div>
 
     <!-- Refresh Bar -->

@@ -1,0 +1,27 @@
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant A as App.vue
+    participant R as Rust Backend
+    participant Q as QuotaCard
+
+    U->>A: 打开应用
+    A->>A: onMounted()
+    A->>R: invoke("get_platform_specs")
+    R-->>A: Vec<PlatformSpec>
+    A->>A: specs.value = result
+    A->>R: invoke("get_all_platforms")
+    R->>R: 遍历 PLATFORM_SPECS
+    R->>R: Api 平台并发查询 + Manual 平台读 store
+    R-->>A: Vec<PlatformStatus>
+    A->>A: platforms.value = result
+    A->>A: splitPlatforms() 拆分
+    A->>Q: 渲染 manual 区块 + api 区块
+    Q-->>U: 显示卡片列表
+
+    Note over A,R: 5 分钟后自动刷新
+    R->>A: emit("auto-refresh")
+    A->>A: refresh()
+    A->>R: invoke("get_all_platforms")
+    R-->>A: Vec<PlatformStatus>
+    A->>A: platforms.value = result（静默更新，无骨架屏）
